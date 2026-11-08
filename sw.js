@@ -1,5 +1,5 @@
 /* JoeysLab offline cache. Bump VERSION whenever index.html or samples change. */
-const VERSION='joeyslab-v4';
+const VERSION='joeyslab-v5';
 const CORE=['./','index.html','manifest.webmanifest','icon.svg','icon-192.png','icon-512.png'];
 const SAMPLES=[
   'samples/808-bird.wav',
