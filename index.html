@@ -902,7 +902,7 @@ function newSong(){
   S.importChords=null;
   if(!S.sample&&!S.bpmLock)S.bpm=rint(r,st.bpm[0],st.bpm[1]);
   S.prog=makeProg(st,r);
-  S.tracks=[];st.stems.forEach((sp,i)=>S.tracks.push(makeTrack(sp,i)));
+  const old=S.tracks||[];S.tracks=[];st.stems.forEach((sp,i)=>{const t=makeTrack(sp,i);const o=old.find(x=>x.picked===S.style&&x.role===t.role&&x.inst===t.inst&&x.name===t.name);if(o){['smp','preset','kit','fxset'].forEach(k=>{if(o[k]!==undefined)t[k]=o[k]&&typeof o[k]==='object'?Object.assign({},o[k]):o[k];});t.picked=S.style;}S.tracks.push(t);});
   regenAll();
   if(S.sample)applySampleMutes();
   S.sel=S.tracks[0].id;
@@ -1230,6 +1230,7 @@ function vDrum(dest,p,t,v){
 const SBUF={};let SAMP_P=null,SAMP_OK=false;
 function decodeAB(ab){return new Promise((res,rej)=>{const p=AC.decodeAudioData(ab,res,rej);if(p&&p.then)p.then(res,rej);});}
 function loadSamples(){if(SAMP_P)return SAMP_P;SAMP_P=Promise.all(SAMPLE_IDS.map(id=>fetch('samples/'+id+'.wav').then(r=>{if(!r.ok)throw new Error('x');return r.arrayBuffer();}).then(decodeAB).then(b=>{SBUF[id]=b;}).catch(()=>{}))).then(()=>{SAMP_OK=Object.keys(SBUF).length>0;});return SAMP_P;}
+function ensureSmp(id){if(!id||SBUF[id])return Promise.resolve(!!SBUF[id]);return fetch('samples/'+id+'.wav',{cache:'reload'}).then(r=>{if(!r.ok)throw 0;return r.arrayBuffer();}).then(decodeAB).then(x=>{SBUF[id]=x;return true;}).catch(()=>{toast('Could not load that sound. Check your connection and reload.');return false;});}
 let OPENHAT=null;
 function vDrumS(dest,kit,p,t,v){
   const slot=NOTE_SLOT[p];const id=kit&&kit[slot];const b=id&&SBUF[id];if(!b)return vDrum(dest,p,t,v);
@@ -1596,7 +1597,7 @@ function openKitMenu(t,anchor,slot){
   if(slot){
     const more=openKitMenu._more===slot;
     btn('← All drum sounds',null,'back',()=>{openKitMenu._more=null;openKitMenu(t,anchor,null);});
-    const pickIt=id=>{snap();t.kit=Object.assign({},t.kit);t.kit[slot]=id;t.kit.name='Custom';hitPreview(t.kit,slot);renderTracks();restartIfPlaying();openKitMenu(t,anchor,slot);};
+    const pickIt=id=>{snap();t.kit=Object.assign({},t.kit);t.kit[slot]=id;t.kit.name='Custom';t.picked=S.style;hitPreview(t.kit,slot);renderTracks();restartIfPlaying();openKitMenu(t,anchor,slot);};
     const row=id=>btn(prettyS(id),t.kit[slot]===id?'✓':'','row'+(t.kit[slot]===id?' on':''),()=>pickIt(id));
     const best=((MATCH[S.style]||{})[slot]||[]).filter(id=>POOL[slot].includes(id));
     const simD=t.kit[slot]?similarTo(t.kit[slot],POOL[slot],4):[];if(simD.length){head('Similar to '+prettyS(t.kit[slot]));simD.forEach(row);m.appendChild(document.createElement('hr'));}
@@ -1610,7 +1611,7 @@ function openKitMenu(t,anchor,slot){
     slots.forEach(sl=>btn(SLOT_LABEL[sl],prettyS(t.kit[sl])+'  ›','row',()=>openKitMenu(t,anchor,sl)));
     m.appendChild(document.createElement('hr'));
     head('Whole kits');
-    Object.keys(KITS).forEach(k=>{btn(KITS[k].name,t.kit.name===KITS[k].name?'✓':'','row'+(t.kit.name===KITS[k].name?' on':''),()=>{snap();t.kit=Object.assign({},KITS[k]);renderTracks();restartIfPlaying();audition(t);openKitMenu(t,anchor,null);});});
+    Object.keys(KITS).forEach(k=>{btn(KITS[k].name,t.kit.name===KITS[k].name?'✓':'','row'+(t.kit.name===KITS[k].name?' on':''),()=>{snap();t.kit=Object.assign({},KITS[k]);t.picked=S.style;renderTracks();restartIfPlaying();audition(t);openKitMenu(t,anchor,null);});});
     btn('Best match for '+STYLES[S.style].name,'re-pick','row',()=>{snap();t.kit=matchedKit(S.style,RAND());renderTracks();restartIfPlaying();audition(t);openKitMenu(t,anchor,null);});
     btn('Shuffle sounds','','row',()=>{snap();const r=rngFrom(newSeed());const k={name:'Shuffled'};Object.keys(POOL).forEach(sl=>k[sl]=pick(r,POOL[sl]));t.kit=k;renderTracks();restartIfPlaying();audition(t);openKitMenu(t,anchor,null);});
   }
@@ -1625,7 +1626,7 @@ function menuKit(m){
 function openPresetMenu(t,anchor,more){
   const m=$('sndMenu');const keep=m.classList.contains('open');m.innerHTML='';const {head,btn,hr}=menuKit(m);
   const grp=SYNTH_GROUP[t.inst];const cur=t.smp?null:t.preset;
-  const choose=(pid,smp)=>{snap();t.preset=pid;t.smp=smp||null;renderTracks();restartIfPlaying();audition(t);openPresetMenu(t,anchor,more);};
+  const choose=(pid,smp)=>{snap();t.preset=pid;t.smp=smp||null;t.picked=S.style;renderTracks();ensureSmp(smp).then(()=>{restartIfPlaying();audition(t);});openPresetMenu(t,anchor,more);};
   const row=pid=>btn(PRESETS[pid].name,cur===pid?'✓':'','row'+(cur===pid?' on':''),()=>choose(pid,null));
   head('Best for '+STYLES[S.style].name);((PMATCH[S.style]||{})[grp]||[]).forEach(row);
   if(!more)btn('See more','all presets ›','row back',()=>openPresetMenu(t,anchor,true));
@@ -1645,7 +1646,7 @@ function openSound(t,anchor,more){
   if(SYNTH_GROUP[t.inst]&&!t.smp)return openPresetMenu(t,anchor,more);
   const m=$('sndMenu');const keep=m.classList.contains('open');m.innerHTML='';const {head,btn,hr}=menuKit(m);
   const opts=soundOptions(t);const redraw=()=>openSound(t,anchor,more);
-  const choose=id=>{snap();t.smp=id;if(id)t.preset=null;renderTracks();restartIfPlaying();audition(t);redraw();};
+  const choose=id=>{snap();t.smp=id;if(id)t.preset=null;t.picked=S.style;renderTracks();redraw();ensureSmp(id).then(()=>{restartIfPlaying();audition(t);});};
   const row=id=>btn(SNAME[id]||id,(t.smp===id?'✓  ':'')+(TAGS[id]||[]).slice(1,4).join(' · '),'row'+(t.smp===id?' on':''),()=>choose(id));
   if(!more&&t.smp&&TAGS[t.smp]){const sim=similarTo(t.smp,opts,5);if(sim.length){head('Similar to '+(SNAME[t.smp]||t.smp));sim.forEach(row);hr();}}
   if(!more){const best=bestFor(t).filter(id=>opts.includes(id));head('Best for '+STYLES[S.style].name);(best.length?best:opts.slice(0,3)).forEach(row);}
@@ -1662,7 +1663,7 @@ function openFxMenu(t,anchor){
   [['impact','Impacts (bar 1 and phrase starts)'],['riser','Risers (into the next phrase)'],['atmo','Atmo (under the intro)'],['texture','Texture (one-off)']].forEach(([slot,lab],k)=>{
     if(k)hr();head(lab);const ids=SAMPLE_IDS.filter(x=>x.startsWith('sfx-'+slot));const cur=t.fxset[slot];
     const order=(cur?[cur].concat(similarTo(cur,ids,ids.length)):[]).concat(ids).filter((x,i,a)=>a.indexOf(x)===i);
-    order.forEach(id=>btn(SNAME[id]||id,(cur===id?'✓  ':(M[slot]||[]).includes(id)?'best · ':'')+(TAGS[id]||[]).slice(1,3).join(' · '),'row'+(cur===id?' on':''),()=>{snap();t.fxset=Object.assign({},t.fxset,{[slot]:id});ensureAudio();const o=AC.createGain();o.gain.value=.8;o.connect(OUT);setTimeout(()=>o.disconnect(),3000);if(SBUF[id]){const x=AC.createBufferSource();x.buffer=SBUF[id];x.connect(o);x.start();}renderTracks();restartIfPlaying();openFxMenu(t,anchor);}));});
+    order.forEach(id=>btn(SNAME[id]||id,(cur===id?'✓  ':(M[slot]||[]).includes(id)?'best · ':'')+(TAGS[id]||[]).slice(1,3).join(' · '),'row'+(cur===id?' on':''),()=>{snap();t.picked=S.style;t.fxset=Object.assign({},t.fxset,{[slot]:id});ensureAudio();const o=AC.createGain();o.gain.value=.8;o.connect(OUT);setTimeout(()=>o.disconnect(),3000);if(SBUF[id]){const x=AC.createBufferSource();x.buffer=SBUF[id];x.connect(o);x.start();}renderTracks();restartIfPlaying();openFxMenu(t,anchor);}));});
   if(!keep)placeMenu(m,anchor);
 }
 function openColor(t,anchor){const cp=$('cpop');cp.innerHTML='';const P=ACC_PAL||PALS[skinKey()]||PALS.dark;
