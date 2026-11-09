@@ -1820,7 +1820,7 @@ function renderAll(){renderControls();renderTracks();renderSection();drawRoll();
 
 /* ---------- downloads ---------- */
 const MIME={mid:'audio/midi',wav:'audio/wav',mp3:'audio/mpeg',zip:'application/zip',txt:'text/plain',json:'application/json'};
-function downloadBlob(data,name){const ext=(name.split('.').pop()||'').toLowerCase();const url=URL.createObjectURL(new Blob([data],{type:MIME[ext]||'application/octet-stream'}));
+function downloadBlob(data,name){const ext=(name.split('.').pop()||'').toLowerCase();if(window.__JUCE__&&window.__JUCE__.backend){const fr=new FileReader();fr.onload=()=>{window.__JUCE__.backend.emitEvent('joeyslab_save',{name,data:String(fr.result).split(',')[1]||''});toast('Saved '+name+' to Music › JoeysLab Exports.');};fr.readAsDataURL(new Blob([data]));return;}const url=URL.createObjectURL(new Blob([data],{type:MIME[ext]||'application/octet-stream'}));
   const a=document.createElement('a');a.href=url;a.download=name;a.style.display='none';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),8000);}
 let CLAUDE_DL;async function claudeDL(){if(CLAUDE_DL!==undefined)return CLAUDE_DL;CLAUDE_DL=null;try{if(window.claude&&window.claude.use)CLAUDE_DL=await Promise.race([window.claude.use('downloads'),new Promise(r=>setTimeout(()=>r(null),2500))]);}catch(e){CLAUDE_DL=null;}return CLAUDE_DL;}
 async function saveFiles(files,zipName){
