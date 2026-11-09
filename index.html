@@ -1300,8 +1300,9 @@ function vDrum(dest,p,t,v){
   else{const o=AC.createOscillator();o.type='square';o.frequency.value=420;o.connect(g);g.gain.setValueAtTime(v*.25,t);g.gain.exponentialRampToValueAtTime(.001,t+.04);o.start(t);o.stop(t+.05);}
 }
 const SBUF={};let SAMP_P=null,SAMP_OK=false;
-function decodeAB(ab){return new Promise((res,rej)=>{const p=AC.decodeAudioData(ab,res,rej);if(p&&p.then)p.then(res,rej);});}
-function loadSamples(){if(SAMP_P)return SAMP_P;SAMP_P=Promise.all(SAMPLE_IDS.map(id=>fetch('samples/'+id+'.wav').then(r=>{if(!r.ok)throw new Error('x');return r.arrayBuffer();}).then(decodeAB).then(b=>{SBUF[id]=b;}).catch(()=>{}))).then(()=>{SAMP_OK=Object.keys(SBUF).length>0;});return SAMP_P;}
+let DEC_CTX=null;
+function decodeAB(ab){return new Promise((res,rej)=>{const ctx=(AC&&AC.decodeAudioData&&!(AC instanceof OfflineAudioContext))?AC:(DEC_CTX||(DEC_CTX=new OfflineAudioContext(2,1,44100)));const p=ctx.decodeAudioData(ab,res,rej);if(p&&p.then)p.then(res,rej);});}
+function loadSamples(){if(SAMP_P)return SAMP_P;SAMP_P=Promise.all(SAMPLE_IDS.map(id=>fetch('samples/'+id+'.wav').then(r=>{if(!r.ok)throw new Error('x');return r.arrayBuffer();}).then(decodeAB).then(b=>{SBUF[id]=b;}).catch(()=>{}))).then(()=>{SAMP_OK=Object.keys(SBUF).length>0;if(Object.keys(SBUF).length<SAMPLE_IDS.length*.9)SAMP_P=null;});return SAMP_P;}
 function ensureSmp(id){if(!id||SBUF[id])return Promise.resolve(!!SBUF[id]);return fetch('samples/'+id+'.wav',{cache:'reload'}).then(r=>{if(!r.ok)throw 0;return r.arrayBuffer();}).then(decodeAB).then(x=>{SBUF[id]=x;return true;}).catch(()=>{toast('Could not load that sound. Check your connection and reload.');return false;});}
 let OPENHAT=null;
 function vDrumS(dest,kit,p,t,v){
@@ -2623,7 +2624,7 @@ if(typeof document!=='undefined')init();
 /* ---- Plugin bridge: only active inside the JoeysLab VST3/AU ---- */
 (function(){const J=window.__JUCE__&&window.__JUCE__.backend;if(!J)return;
   window.IN_PLUGIN=true;let HOST={playing:false,follow:true,sounds:true,bpm:120,sr:0},lastSong='';
-  setTimeout(()=>{try{loadSamples();}catch(e){}},500);
+  setTimeout(()=>{try{loadSamples().then(()=>{const n=Object.keys(SBUF).length;if(n<SAMPLE_IDS.length)toast('Only '+n+' of '+SAMPLE_IDS.length+' sounds loaded. Click ↻ Reload at the bottom.');});}catch(e){}},500);
   const songForHost=()=>{let ch=0;const tracks=S.tracks.filter(t=>t.role!=='fx'&&t.notes&&t.notes.length).map(t=>{let c;if(t.role==='drums')c=10;else{ch++;if(ch===10)ch++;c=Math.min(16,ch);}return {name:t.name,ch:c,on:audible(t),notes:t.notes.map(n=>[n.p,+n.s.toFixed(4),+n.d.toFixed(4),+(n.v||.8).toFixed(3)])};});
     return {total:totalSteps(),bpm:S.bpm,tracks,session:sessionObj()};};
   const push=()=>{try{const o=songForHost();const j=JSON.stringify([o.total,o.bpm,o.tracks]);if(j===lastSong)return;lastSong=j;J.emitEvent('joeyslab_song',o);}catch(e){}};
