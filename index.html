@@ -2611,6 +2611,7 @@ if(typeof document!=='undefined')init();
   J.addEventListener('joeyslab_host',h=>{const was=HOST;HOST=h;
     if(h.follow&&h.bpm&&Math.abs(h.bpm-S.bpm)>.05){S.bpm=Math.round(h.bpm*100)/100;const b=document.getElementById('bpm');if(b)b.value=Math.round(S.bpm);if(playing&&!byHost)restartIfPlaying();}
     const want=h.follow&&h.playing&&h.sounds;
+    if(want&&h.jump&&playing&&byHost&&!starting){stopPlay();starting=true;startPlay(((h.ppq||0)*4)%Math.max(1,totalSteps())).then(()=>{starting=false;});return;}
     if(want&&!playing&&!starting){byHost=true;starting=true;startPlay(((h.ppq||0)*4)%Math.max(1,totalSteps())).then(()=>{starting=false;if(!(HOST.follow&&HOST.playing&&HOST.sounds)&&playing){byHost=false;stopPlay();}});}
     else if(!want&&playing&&byHost){byHost=false;stopPlay();}
     if(!playing&&!starting)byHost=false;});

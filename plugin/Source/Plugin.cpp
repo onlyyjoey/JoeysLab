@@ -202,6 +202,7 @@ static juce::File writeMidi (const Song& song, int trackIndex)
     juce::MidiMessageSequence tempo;
     tempo.addEvent (juce::MidiMessage::tempoMetaEvent ((int) (60000000.0 / juce::jmax (1.0, song.bpm))), 0);
     tempo.addEvent (juce::MidiMessage::timeSignatureMetaEvent (4, 4), 0);
+    tempo.addEvent (juce::MidiMessage::endOfTrack(), song.totalSteps * 240.0);
     mf.addTrack (tempo);
 
     juce::String name = "JoeysLab";
@@ -212,13 +213,16 @@ static juce::File writeMidi (const Song& song, int trackIndex)
         juce::MidiMessageSequence seq;
         auto title = juce::MidiMessage::textMetaEvent (3, t.name);
         seq.addEvent (title, 0);
+        const double endTick = song.totalSteps * 240.0;
         for (auto& note : t.notes)
         {
-            const double on = note.start * 240.0, off = (note.start + note.length) * 240.0;
+            if (note.start >= song.totalSteps) continue;
+            const double on = note.start * 240.0, off = juce::jmin (endTick - 1.0, (note.start + note.length) * 240.0);
             seq.addEvent (juce::MidiMessage::noteOn (t.channel, note.pitch, juce::jlimit (0.05f, 1.0f, note.velocity)), on);
             seq.addEvent (juce::MidiMessage::noteOff (t.channel, note.pitch), off);
         }
         seq.updateMatchedPairs();
+        seq.addEvent (juce::MidiMessage::endOfTrack(), endTick);
         mf.addTrack (seq);
         if (trackIndex >= 0) name = t.name;
     }
@@ -381,11 +385,16 @@ private:
     {
         const bool playing = proc.hostPlaying;
         const double bpm = proc.hostBpm;
-        if (! force && playing == lastPlaying && std::abs (bpm - lastBpm) < 0.01) return;
+        const double ppq = proc.hostPpq.load(), now = juce::Time::getMillisecondCounterHiRes() / 1000.0;
+        const double expected = lastPpq + (now - lastTime) * bpm / 60.0;
+        const bool jumped = playing && lastPlaying && std::abs (ppq - expected) > 0.5;
+        lastPpq = ppq; lastTime = now;
+        if (! force && ! jumped && playing == lastPlaying && std::abs (bpm - lastBpm) < 0.01) return;
         lastPlaying = playing; lastBpm = bpm;
         auto* o = new juce::DynamicObject();
         o->setProperty ("playing", playing);
-        o->setProperty ("ppq", proc.hostPpq.load());
+        o->setProperty ("ppq", ppq);
+        o->setProperty ("jump", jumped);
         o->setProperty ("bpm", bpm);
         o->setProperty ("follow", proc.followHost.load());
         o->setProperty ("sounds", proc.pluginSounds.load());
@@ -475,7 +484,7 @@ private:
     std::vector<std::unique_ptr<DragChip>> chips;
     int seenVersion = -1;
     bool lastPlaying = false;
-    double lastBpm = 0;
+    double lastBpm = 0, lastPpq = 0, lastTime = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JoeysLabEditor)
 };
