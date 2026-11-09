@@ -395,6 +395,7 @@ body.dragging .app{outline:2px dashed var(--hl);outline-offset:4px;border-radius
   <div class="prow"><label for="vol">Volume</label><input type="range" id="vol" min="0" max="100" value="75"></div>
   <div class="prow"><label for="ghost">Show other stems in the piano roll</label><input type="checkbox" id="ghost" checked></div>
   <h3>Generate</h3>
+  <div class="prow" data-tip="After each Generate, measures every stem and drum piece and sets their levels to genre mix targets (kick and 808 up front, snare level with the kick, hats and pads tucked under)."><label for="optAutoMix">Auto-mix levels on Generate</label><input type="checkbox" id="optAutoMix"></div>
   <div class="prow" data-tip="808 glides and guitar bends. Off by default because plain MIDI notes can't carry them into FL Studio."><label for="optBends">808 glides and pitch bends</label><input type="checkbox" id="optBends"></div>
   <div class="prow" data-tip="Adds toms, percs, rims, a second snare and FX hits. Off = kick, snare, clap, hats and open hats only."><label for="optExtras">Drum extras (toms, percs, FX)</label><input type="checkbox" id="optExtras"></div>
   <h3>Saved on this device</h3>
@@ -2202,12 +2203,49 @@ async function renderStem(tracks){
   const b=await oc.startRendering();let pk=0;for(let c=0;c<b.numberOfChannels;c++){const d=b.getChannelData(c);for(let i=0;i<d.length;i++)pk=Math.max(pk,Math.abs(d[i]));}
   if(pk>.95){const k=.95/pk;for(let c=0;c<b.numberOfChannels;c++){const d=b.getChannelData(c);for(let i=0;i<d.length;i++)d[i]*=k;}}return b;
 }
+/* Same per-stem chain as live playback (pre-gain -> drive -> tone -> level x volume), for offline renders */
+function stemChain(ctx,dest,inst,tr,vol){
+  const k=DRIVE_K[inst]||1.5;const g=ctx.createGain();g.gain.value=inst==='drums'||inst==='sample'?1:.9;const ws=ctx.createWaveShaper();ws.curve=curveK(k);
+  const tone=ctx.createBiquadFilter();tone.type='lowpass';tone.frequency.value=inst==='drums'||inst==='sample'?18000:['pad','wash','strings'].includes(inst)?5200:7500;tone.Q.value=.5;
+  const lvl=(MIX[inst]||[.2])[0];const post=ctx.createGain();post.gain.value=lvl*(inst==='drums'||inst==='sample'?1:.8)*vol;g.connect(ws);ws.connect(tone);tone.connect(post);post.connect(dest);return g;}
+/* ---- Auto-mix: measure each stem (and each drum piece) like a loudness meter, then set levels to genre targets ---- */
+const MIX_TARGET={k:0,s:-1,s2:-4,c:-2,h:-11,o:-10,r:-12,t:-7,u:-7,p:-12,q:-13,f:-14,y:-13};
+const STEM_TARGET={bass808:-3,bass:-4,sub:-4,melody:-5,counter:-9,chords:-11,arp:-10,earcandy:-13,solo:-7,chops:-10,fx:-15,sample:-4};
+const STYLE_MIX={yeat:{melody:-4.5,chords:-13,counter:-8,bass808:-2.5},don:{chords:-9.5,melody:-6,arp:-9},kanye:{sample:-3,chords:-8,melody:-6,bass:-5},cudi:{chords:-9,melody:-6.5,earcandy:-12},clams:{chords:-8,chops:-8,earcandy:-11,sample:-3,s:-2.5,h:-13},hyper:{melody:-5,counter:-10,arp:-10,bass:-8,chords:-11.5},post:{arp:-7,bass:-5,chords:-11,melody:-8,s:-.5,o:-8}};
+async function measureLoud(build,len,sr){
+  sr=sr||44100;const oc=new OfflineAudioContext(2,Math.max(1,Math.ceil(len*sr)),sr);
+  const hp=oc.createBiquadFilter();hp.type='highpass';hp.frequency.value=38;hp.Q.value=.5;const sh=oc.createBiquadFilter();sh.type='highshelf';sh.frequency.value=1500;sh.gain.value=4;hp.connect(sh);sh.connect(oc.destination);
+  const real=AC,oh=OPENHAT;AC=oc;OPENHAT=null;try{build(oc,hp);}finally{AC=real;OPENHAT=oh;}
+  const b=await oc.startRendering();const L=b.getChannelData(0),R=b.getChannelData(Math.min(1,b.numberOfChannels-1));const W=Math.round(sr*.1);const pw=[];
+  for(let i=0;i+W<=L.length;i+=W){let s2=0;for(let j=i;j<i+W;j++)s2+=(L[j]*L[j]+R[j]*R[j])*.5;pw.push(s2/W);}
+  const act=pw.filter(x=>x>1e-7);if(!act.length)return null;const m1=act.reduce((a,b)=>a+b,0)/act.length;const g2=act.filter(x=>x>m1*.1);const m2=g2.reduce((a,b)=>a+b,0)/g2.length;return 10*Math.log10(m2);}
+let AUTOMIX_ID=0;
+async function autoMix(quiet){
+  const id=++AUTOMIX_ID;await loadSamples();const sd=60/S.bpm/4,T=totalSteps(),len=T*sd+1;const style=STYLE_MIX[S.style]||{};
+  const tgt=k=>style[k]!=null?style[k]:(MIX_TARGET[k]!=null?MIX_TARGET[k]:STEM_TARGET[k]);
+  const meas={};let kickL=null;const drums=S.tracks.find(t=>t.role==='drums'&&t.notes.length);
+  if(drums){const slots=[...new Set(drums.notes.map(n=>NOTE_SLOT[n.p]).filter(Boolean))];const pv={};
+    for(const sl of slots){const L=await measureLoud((oc,dst)=>{const inp=stemChain(oc,dst,'drums',drums,1);drums.notes.filter(n=>NOTE_SLOT[n.p]===sl).forEach(n=>playTrackNote(Object.assign({},drums,{pieceVol:{}}),inp,n,n.s*sd,n.d*sd));},len);if(id!==AUTOMIX_ID)return;if(L!=null)pv[sl]=L;}
+    const ref=pv.k!=null?pv.k:Math.max(...Object.values(pv));kickL=ref;const nv={};
+    Object.keys(pv).forEach(sl=>{nv[sl]=+clamp(Math.pow(10,((ref+(tgt(sl)!=null?tgt(sl):-10))-pv[sl])/20),0,1.5).toFixed(2);});
+    if(pv.k!=null)nv.k=1;drums.pieceVol=nv;}
+  for(const t of S.tracks){if(t===drums||!t.notes.length)continue;const L=await measureLoud((oc,dst)=>{const inp=stemChain(oc,dst,t.inst,t,1);t.notes.forEach(n=>playTrackNote(t,inp,n,n.s*sd,n.d*sd));},len);if(id!==AUTOMIX_ID)return;if(L!=null)meas[t.id]=L;}
+  let sampleL=null;if(S.sample&&S.sample.buffer){sampleL=await measureLoud((oc,dst)=>{const inp=stemChain(oc,dst,'sample',null,1);const src=oc.createBufferSource();src.buffer=S.sample.buffer;src.connect(inp);src.start(0);},Math.min(len,S.sample.buffer.duration+.2));if(id!==AUTOMIX_ID)return;}
+  // anchor: kick at drums 85% (or the loudest stem if there are no drums), then solve every fader; pull everything down together if anything would pass 140%
+  const anchor=kickL!=null?kickL+20*Math.log10(.85):Math.max(...Object.values(meas),sampleL==null?-99:sampleL)-3;
+  const want={};S.tracks.forEach(t=>{if(t===drums){want[t.id]=.85;return;}if(meas[t.id]==null)return;const tg=tgt(t.role);want[t.id]=Math.pow(10,((anchor+(tg!=null?tg:-10))-meas[t.id])/20);});
+  let sw=null;if(sampleL!=null)sw=Math.pow(10,((anchor+tgt('sample'))-sampleL)/20);
+  const mx=Math.max(...Object.values(want),sw||0);const k=mx>1.4?1.4/mx:1;
+  S.tracks.forEach(t=>{if(want[t.id]!=null)t.vol=+clamp(want[t.id]*k,.02,1.5).toFixed(2);});if(sw!=null)S.sample.vol=+clamp(sw*k,.02,1.5).toFixed(2);
+  renderTracks();if(typeof updateGains==='function'&&SESSION){S.tracks.forEach(t=>{const c=SESSION.chans[t.id];if(c)c.post.gain.setTargetAtTime(c.base*(t.vol==null?1:t.vol),AC.currentTime,.03);});}
+  drawRoll();if(!quiet)toast('Auto-mixed: drums, 808 and lead up front, hats and pads tucked under.');
+}
 async function renderLoopForHost(sr){
   await loadSamples();const sd=60/S.bpm/4,T=totalSteps(),len=T*sd,tail=2.5,N=Math.ceil(len*sr);
   const oc=new OfflineAudioContext(2,Math.ceil((len+tail)*sr),sr);const real=AC,oh=OPENHAT;AC=oc;OPENHAT=null;
-  try{S.tracks.filter(t=>audible(t)&&t.notes&&t.notes.length).forEach(t=>{const bus=oc.createGain();bus.gain.value=((MIX[t.inst]||[.4])[0])*1.7*(t.vol==null?1:t.vol);const ws=oc.createWaveShaper();ws.curve=curveK(DRIVE_K[t.inst]||1.2);bus.connect(ws);ws.connect(oc.destination);
-      t.notes.forEach(n=>playTrackNote(t,bus,n,n.s*sd,n.d*sd));});
-    if(S.sample&&S.sample.buffer&&audible(S.sample)){const g=oc.createGain();g.gain.value=(S.sample.vol==null?1:S.sample.vol)*.9;g.connect(oc.destination);const ls=(S.sample.loopBars||4)*16;
+  try{const mb=oc.createGain();mb.gain.value=2.2;mb.connect(oc.destination);S.tracks.filter(t=>audible(t)&&t.notes&&t.notes.length).forEach(t=>{const inp=stemChain(oc,mb,t.inst,t,t.vol==null?1:t.vol);
+      t.notes.forEach(n=>playTrackNote(t,inp,n,n.s*sd,n.d*sd));});
+    if(S.sample&&S.sample.buffer&&audible(S.sample)){const g=stemChain(oc,mb,'sample',null,S.sample.vol==null?1:S.sample.vol);const ls=(S.sample.loopBars||4)*16;
       for(let k=0;k*ls<T;k++){const src=oc.createBufferSource();src.buffer=S.sample.buffer;src.connect(g);const at=k*ls*sd;src.start(at,0);src.stop(at+Math.min(S.sample.buffer.duration,Math.min(ls,T-k*ls)*sd));}}
   }finally{AC=real;OPENHAT=oh;}
   const b=await oc.startRendering();const out=[0,1].map(c=>{const d=b.getChannelData(Math.min(c,b.numberOfChannels-1));const o=d.slice(0,N);for(let i=N;i<d.length;i++)o[(i-N)%N]+=d[i];return o;});
@@ -2446,7 +2484,8 @@ function init(){
   if(LS.get('stemlab-bpmlock')==='1'){const b=+LS.get('stemlab-bpm');if(b>=50&&b<=200)S.bpm=b;setLock(true);}else setLock(false);
   $('gen').onclick=e=>{e.stopPropagation();const m=$('sndMenu');if(m.classList.contains('open')&&m.dataset.for==='gen'){m.classList.remove('open');return;}m.innerHTML='';m.dataset.for='gen';const {head,btn,hr}=menuKit(m);
     head('Generate · '+STYLES[S.style].name+' in '+keyName());
-    Object.keys(GEN_MODES).forEach(k=>{const g=GEN_MODES[k];btn(g.label,g.sub,'row'+(S.tracks.length&&S.genMode===k?' on':''),()=>{m.classList.remove('open');snap();newSong(k);AS_HOLD=false;renderAll();restartIfPlaying();});});
+    Object.keys(GEN_MODES).forEach(k=>{const g=GEN_MODES[k];btn(g.label,g.sub,'row'+(S.tracks.length&&S.genMode===k?' on':''),()=>{m.classList.remove('open');snap();newSong(k);AS_HOLD=false;renderAll();restartIfPlaying();if(S.opts.autoMix)autoMix(true);});});
+    if(S.tracks.length){hr();btn('Auto-mix levels now','balance every stem and drum piece','row',()=>{m.classList.remove('open');snap();autoMix(false);});}
     if(AS_HOLD){hr();btn('Restore last session','pick up where you left off','row',()=>{m.classList.remove('open');AS_HOLD=false;restoreSession().then(ok=>toast(ok?'Last session restored.':'No saved session found.'));});}
     placeMenu(m,$('gen'));};
   $('newChords').onclick=()=>{if(S.sample)return;snap();S.importChords=null;S.prog=makeProg(STYLES[S.style],rngFrom(newSeed()));regenAll();renderAll();restartIfPlaying();toast('New chords. Every stem re-fit to them.');};
@@ -2720,6 +2759,7 @@ function init(){
   $('vol').oninput=e=>{VOL=+e.target.value/100;if(OUT)OUT.gain.setTargetAtTime(VOL,AC.currentTime,.02);store.set('stemlab-vol',e.target.value);};
   S.opts.bends=store.get('stemlab-bends')==='1';S.opts.extras=store.get('stemlab-extras')==='1';
   $('forgetSess').onclick=async()=>{AS_OFF=true;try{localStorage.removeItem('joeyslab-session');}catch(e){}await IDB.clear();AS_IDS={};AS_LAST='';toast('Saved session cleared from this device. It starts saving again after your next change.');setTimeout(()=>{AS_OFF=false;},4000);};
+  S.opts.autoMix=store.get('jl-automix')!=='0';$('optAutoMix').checked=S.opts.autoMix;$('optAutoMix').onchange=e=>{S.opts.autoMix=e.target.checked;store.set('jl-automix',S.opts.autoMix?'1':'0');};
   $('optBends').checked=S.opts.bends;$('optExtras').checked=S.opts.extras;
   $('optBends').onchange=e=>{S.opts.bends=e.target.checked;store.set('stemlab-bends',S.opts.bends?'1':'0');
     if(S.opts.bends)S.tracks.filter(t=>t.role==='bass808'&&!t.notes.some(n=>n.g!=null)).forEach(t=>{const r=rngFrom(t.seed+7);const N=t.notes;N.forEach((n,i)=>{const nx=N[i+1];if(nx&&nx.p!==n.p&&nx.s-(n.s+n.d)<.1&&chance(r,t.glide||.25))n.g=nx.p;});});
