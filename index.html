@@ -2211,7 +2211,7 @@ function stemChain(ctx,dest,inst,tr,vol){
 /* ---- Auto-mix: measure each stem (and each drum piece) like a loudness meter, then set levels to genre targets ---- */
 const MIX_TARGET={k:0,s:-1,s2:-4,c:-2,h:-11,o:-10,r:-12,t:-7,u:-7,p:-12,q:-13,f:-14,y:-13};
 const STEM_TARGET={bass808:-3,bass:-4,sub:-4,melody:-5,counter:-9,chords:-11,arp:-10,earcandy:-13,solo:-7,chops:-10,fx:-15,sample:-4};
-const STYLE_MIX={yeat:{melody:-10.9,counter:-14.6,chords:-14,earcandy:-13.2,bass808:1.5,bass:1.5,sub:1.5,h:-13.9},don:{chords:-9.5,melody:-6,arp:-9},kanye:{sample:-3,chords:-8,melody:-6,bass:-5},cudi:{chords:-9,melody:-6.5,earcandy:-12},clams:{chords:-8,chops:-8,earcandy:-11,sample:-3,s:-2.5,h:-13},hyper:{melody:-5,counter:-10,arp:-10,bass:-8,chords:-11.5},post:{arp:-7,bass:-5,chords:-11,melody:-8,s:-.5,o:-8}};
+const STYLE_MIX={yeat:{melody:-10.9,counter:-14.6,chords:-14,earcandy:-13.2,bass808:1.2,bass:1.2,sub:1.2,h:-13.9},don:{chords:-9.5,melody:-6,arp:-9},kanye:{sample:-3,chords:-8,melody:-6,bass:-5},cudi:{chords:-9,melody:-6.5,earcandy:-12},clams:{chords:-8,chops:-8,earcandy:-11,sample:-3,s:-2.5,h:-13},hyper:{melody:-5,counter:-10,arp:-10,bass:-8,chords:-11.5},post:{arp:-7,bass:-5,chords:-11,melody:-8,s:-.5,o:-8}};
 async function measureLoud(build,len,sr){
   sr=sr||44100;const oc=new OfflineAudioContext(2,Math.max(1,Math.ceil(len*sr)),sr);
   const hp=oc.createBiquadFilter();hp.type='highpass';hp.frequency.value=38;hp.Q.value=.5;const sh=oc.createBiquadFilter();sh.type='highshelf';sh.frequency.value=1500;sh.gain.value=4;hp.connect(sh);sh.connect(oc.destination);
@@ -2220,25 +2220,25 @@ async function measureLoud(build,len,sr){
   for(let i=0;i+W<=L.length;i+=W){let s2=0;for(let j=i;j<i+W;j++)s2+=(L[j]*L[j]+R[j]*R[j])*.5;pw.push(s2/W);}
   const act=pw.filter(x=>x>1e-7);if(!act.length)return null;const m1=act.reduce((a,b)=>a+b,0)/act.length;const g2=act.filter(x=>x>m1*.1);const m2=g2.reduce((a,b)=>a+b,0)/g2.length;return 10*Math.log10(m2);}
 /* Your preferred fader ranges per style (auto-mix lands inside these). ADL: lead 64, bounce 44, pad 61, bell 87, 808/bass 100, hats knob 55 */
-const STYLE_RANGE={yeat:{melody:[.56,.72],counter:[.38,.5],chords:[.53,.69],earcandy:[.78,.96],bass808:[.94,1.06],bass:[.94,1.06],sub:[.94,1.06],h:[.48,.62]}};
-let AUTOMIX_ID=0;
+const STYLE_RANGE={yeat:{melody:[.56,.72],counter:[.38,.5],chords:[.53,.69],earcandy:[.78,.96],bass808:[.94,1],bass:[.94,1],sub:[.94,1],h:[.48,.62]}};
+let AUTOMIX_ID=0,DRUM_MAKEUP=1;
 async function autoMix(quiet){
-  const id=++AUTOMIX_ID;await loadSamples();const sd=60/S.bpm/4,T=totalSteps(),len=T*sd+1;const style=STYLE_MIX[S.style]||{};
+  const id=++AUTOMIX_ID;DRUM_MAKEUP=1;await loadSamples();const sd=60/S.bpm/4,T=totalSteps(),len=T*sd+1;const style=STYLE_MIX[S.style]||{};
   const tgt=k=>style[k]!=null?style[k]:(MIX_TARGET[k]!=null?MIX_TARGET[k]:STEM_TARGET[k]);
   const meas={};let kickL=null;const drums=S.tracks.find(t=>t.role==='drums'&&t.notes.length);
   if(drums){const slots=[...new Set(drums.notes.map(n=>NOTE_SLOT[n.p]).filter(Boolean))];const pv={};
     for(const sl of slots){const L=await measureLoud((oc,dst)=>{const inp=stemChain(oc,dst,'drums',drums,1);drums.notes.filter(n=>NOTE_SLOT[n.p]===sl).forEach(n=>playTrackNote(Object.assign({},drums,{pieceVol:{}}),inp,n,n.s*sd,n.d*sd));},len);if(id!==AUTOMIX_ID)return;if(L!=null)pv[sl]=L;}
     const ref=pv.k!=null?pv.k:Math.max(...Object.values(pv));kickL=ref;const nv={};
-    Object.keys(pv).forEach(sl=>{nv[sl]=+clamp(Math.pow(10,((ref+(tgt(sl)!=null?tgt(sl):-10))-pv[sl])/20),0,1.5).toFixed(2);});
-    if(pv.k!=null)nv.k=1;const RG=STYLE_RANGE[S.style]||{};Object.keys(nv).forEach(sl=>{if(RG[sl])nv[sl]=+clamp(nv[sl],RG[sl][0],RG[sl][1]).toFixed(2);});drums.pieceVol=nv;}
+    Object.keys(pv).forEach(sl=>{nv[sl]=Math.pow(10,((ref+(tgt(sl)!=null?tgt(sl):-10))-pv[sl])/20);});
+    if(pv.k!=null)nv.k=1;{const top=Math.max(...Object.values(nv));if(top>1){Object.keys(nv).forEach(sl=>nv[sl]/=top);DRUM_MAKEUP=top;}}Object.keys(nv).forEach(sl=>nv[sl]=+clamp(nv[sl],0,1).toFixed(2));const RG=STYLE_RANGE[S.style]||{};Object.keys(nv).forEach(sl=>{if(RG[sl])nv[sl]=+clamp(nv[sl],RG[sl][0],RG[sl][1]).toFixed(2);});drums.pieceVol=nv;}
   for(const t of S.tracks){if(t===drums||!t.notes.length)continue;const L=await measureLoud((oc,dst)=>{const inp=stemChain(oc,dst,t.inst,t,1);t.notes.forEach(n=>playTrackNote(t,inp,n,n.s*sd,n.d*sd));},len);if(id!==AUTOMIX_ID)return;if(L!=null)meas[t.id]=L;}
   let sampleL=null;if(S.sample&&S.sample.buffer){sampleL=await measureLoud((oc,dst)=>{const inp=stemChain(oc,dst,'sample',null,1);const src=oc.createBufferSource();src.buffer=S.sample.buffer;src.connect(inp);src.start(0);},Math.min(len,S.sample.buffer.duration+.2));if(id!==AUTOMIX_ID)return;}
   // anchor: kick at drums 85% (or the loudest stem if there are no drums), then solve every fader; pull everything down together if anything would pass 140%
   const anchor=kickL!=null?kickL+20*Math.log10(.85):Math.max(...Object.values(meas),sampleL==null?-99:sampleL)-3;
-  const want={};S.tracks.forEach(t=>{if(t===drums){want[t.id]=.85;return;}if(meas[t.id]==null)return;const tg=tgt(t.role);want[t.id]=Math.pow(10,((anchor+(tg!=null?tg:-10))-meas[t.id])/20);});
+  const want={};S.tracks.forEach(t=>{if(t===drums){want[t.id]=Math.min(1,.85*DRUM_MAKEUP);return;}if(meas[t.id]==null)return;const tg=tgt(t.role);want[t.id]=Math.pow(10,((anchor+(tg!=null?tg:-10))-meas[t.id])/20);});
   let sw=null;if(sampleL!=null)sw=Math.pow(10,((anchor+tgt('sample'))-sampleL)/20);
-  const mx=Math.max(...Object.values(want),sw||0);const k=mx>1.4?1.4/mx:1;
-  const RG=STYLE_RANGE[S.style]||{};S.tracks.forEach(t=>{if(want[t.id]==null)return;let v=t===drums?want[t.id]:want[t.id]*k;if(RG[t.role])v=clamp(v,RG[t.role][0],RG[t.role][1]);t.vol=+clamp(v,.02,1.5).toFixed(2);});if(sw!=null)S.sample.vol=+clamp(sw*k,.02,1.5).toFixed(2);
+  const k=1;   /* a stem that would need more than 100% just stops at 100%; the rest of the balance stays put */
+  const RG=STYLE_RANGE[S.style]||{};S.tracks.forEach(t=>{if(want[t.id]==null)return;let v=t===drums?want[t.id]:want[t.id]*k;if(RG[t.role])v=clamp(v,RG[t.role][0],RG[t.role][1]);t.vol=+clamp(v,.02,1).toFixed(2);});if(sw!=null)S.sample.vol=+clamp(sw*k,.02,1).toFixed(2);
   renderTracks();if(typeof updateGains==='function'&&SESSION){S.tracks.forEach(t=>{const c=SESSION.chans[t.id];if(c)c.post.gain.setTargetAtTime(c.base*(t.vol==null?1:t.vol),AC.currentTime,.03);});}
   drawRoll();if(!quiet)toast('Auto-mixed: drums, 808 and lead up front, hats and pads tucked under.');
 }
