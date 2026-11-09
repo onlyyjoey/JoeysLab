@@ -37,7 +37,29 @@ const juce::Colour kBg { 0xff0b0d12 }, kPanel { 0xff141821 }, kLine { 0xff262c38
 // Song data sent from the web app. Steps are 16th notes.
 struct SongNote  { int pitch = 60; double start = 0, length = 1; float velocity = 0.8f; };
 struct SongTrack { juce::String name; int channel = 1; bool enabled = true; std::vector<SongNote> notes; };
+struct Mix       { double sampleRate = 44100, totalSteps = 128; juce::AudioBuffer<float> audio; };
 struct Song      { double totalSteps = 128; double bpm = 120; std::vector<SongTrack> tracks; };
+
+static std::shared_ptr<Song> parseSong (const juce::var& v)
+{
+    auto s = std::make_shared<Song>();
+    s->totalSteps = (double) v.getProperty ("total", 128.0);
+    s->bpm = (double) v.getProperty ("bpm", 120.0);
+    if (auto* arr = v.getProperty ("tracks", {}).getArray())
+        for (auto& tv : *arr)
+        {
+            SongTrack t;
+            t.name = tv.getProperty ("name", "Stem").toString();
+            t.channel = juce::jlimit (1, 16, (int) tv.getProperty ("ch", 1));
+            t.enabled = (bool) tv.getProperty ("on", true);
+            if (auto* notes = tv.getProperty ("notes", {}).getArray())
+                for (auto& nv : *notes)
+                    if (auto* a = nv.getArray(); a != nullptr && a->size() >= 4)
+                        t.notes.push_back ({ juce::jlimit (0, 127, (int) (*a)[0]), (double) (*a)[1], (double) (*a)[2], (float) (double) (*a)[3] });
+            s->tracks.push_back (std::move (t));
+        }
+    return s;
+}
 
 //==============================================================================
 class JoeysLabProcessor : public juce::AudioProcessor
@@ -60,6 +82,17 @@ public:
         { const juce::SpinLock::ScopedLockType l (songLock); pendingSong = std::move (s); }
         songVersion++;
     }
+    void setMix (std::shared_ptr<const Mix> m)
+    {
+        const juce::SpinLock::ScopedLockType l (songLock);
+        pendingMix = std::move (m);
+    }
+    std::shared_ptr<const Mix> getMixCopy() const
+    {
+        const juce::SpinLock::ScopedLockType l (songLock);
+        return pendingMix;
+    }
+    double getSampleRateNow() const { return sampleRate; }
     std::shared_ptr<const Song> getSongCopy() const
     {
         const juce::SpinLock::ScopedLockType l (songLock);
@@ -78,10 +111,10 @@ public:
 
         {   // pick up a new song if one is waiting (never blocks the audio thread)
             const juce::SpinLock::ScopedTryLockType l (songLock);
-            if (l.isLocked() && pendingSong != song)
+            if (l.isLocked())
             {
-                allNotesOff (midi, 0);
-                song = pendingSong;
+                if (pendingSong != song) { allNotesOff (midi, 0); song = pendingSong; }
+                mix = pendingMix;
             }
         }
 
@@ -94,6 +127,9 @@ public:
                 bpm = pos->getBpm().orFallback (120.0);
             }
         hostPlaying = playing; hostPpq = ppq; hostBpm = bpm;
+
+        if (playing && pluginSounds.load() && mix != nullptr && mix->audio.getNumSamples() > 1 && mix->totalSteps > 0)
+            renderMix (buffer, ppq, bpm);
 
         if (! playing || ! midiOut.load() || song == nullptr || song->totalSteps <= 0)
         {
@@ -159,6 +195,17 @@ public:
         v.setProperty ("follow", followHost.load(), nullptr);
         v.setProperty ("sounds", pluginSounds.load(), nullptr);
         v.setProperty ("songJson", lastSongJson, nullptr);
+        if (auto m = getMixCopy(); m != nullptr && m->audio.getNumSamples() > 0)
+        {
+            juce::MemoryBlock mb ((size_t) m->audio.getNumSamples() * 4);
+            auto* d = static_cast<int16_t*> (mb.getData());
+            for (int i = 0; i < m->audio.getNumSamples(); ++i)
+                for (int c = 0; c < 2; ++c)
+                    d[i * 2 + c] = (int16_t) juce::jlimit (-32767, 32767, (int) std::lround (m->audio.getSample (juce::jmin (c, m->audio.getNumChannels() - 1), i) * 32767.0f));
+            v.setProperty ("mix", mb, nullptr);
+            v.setProperty ("mixSr", m->sampleRate, nullptr);
+            v.setProperty ("mixSteps", m->totalSteps, nullptr);
+        }
         juce::MemoryOutputStream out (dest, false);
         v.writeToStream (out);
     }
@@ -170,12 +217,56 @@ public:
         followHost = (bool) v.getProperty ("follow", true);
         pluginSounds = (bool) v.getProperty ("sounds", true);
         lastSongJson = v.getProperty ("songJson", "").toString();
+        if (auto* mb = v.getProperty ("mix").getBinaryData(); mb != nullptr && mb->getSize() >= 8)
+        {
+            auto m = std::make_shared<Mix>();
+            m->sampleRate = (double) v.getProperty ("mixSr", 44100.0);
+            m->totalSteps = (double) v.getProperty ("mixSteps", 128.0);
+            const int frames = (int) (mb->getSize() / 4);
+            m->audio.setSize (2, frames);
+            auto* d = static_cast<const int16_t*> (mb->getData());
+            for (int i = 0; i < frames; ++i)
+                for (int c = 0; c < 2; ++c)
+                    m->audio.setSample (c, i, d[i * 2 + c] / 32768.0f);
+            setMix (m);
+        }
+        if (lastSongJson.isNotEmpty())
+        {
+            auto sv = juce::JSON::parse (lastSongJson);
+            if (sv.isObject()) setSong (parseSong (sv));
+        }
     }
 
     juce::String lastSongJson;   // the web app's song, saved with the DAW project
 
 private:
     struct ActiveNote { int ch, pitch; double off; };
+
+    // Plays the rendered mix locked to the host playhead: every output sample is read from the
+    // position that matches the host's beat, so loops, jumps and stops are sample-accurate.
+    void renderMix (juce::AudioBuffer<float>& buffer, double ppq, double bpm)
+    {
+        const auto& src = mix->audio;
+        const int len = src.getNumSamples();
+        const double T = mix->totalSteps;
+        const double stepsPerSample = bpm / 60.0 * 4.0 / sampleRate;
+        const double framesPerStep = (double) len / T;
+        const double a = ppq * 4.0;
+        const int outCh = buffer.getNumChannels();
+        const float* L = src.getReadPointer (0);
+        const float* R = src.getReadPointer (juce::jmin (1, src.getNumChannels() - 1));
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+        {
+            double step = std::fmod (a + i * stepsPerSample, T);
+            if (step < 0) step += T;
+            const double f = step * framesPerStep;
+            const int i0 = (int) f;
+            const int i1 = (i0 + 1) % len;
+            const float frac = (float) (f - i0), l = L[i0 % len] + frac * (L[i1] - L[i0 % len]), r = R[i0 % len] + frac * (R[i1] - R[i0 % len]);
+            if (outCh > 0) buffer.getWritePointer (0)[i] = l;
+            if (outCh > 1) buffer.getWritePointer (1)[i] = r;
+        }
+    }
 
     void allNotesOff (juce::MidiBuffer& midi, int pos)
     {
@@ -188,6 +279,7 @@ private:
     bool wasPlaying = false;
     std::vector<ActiveNote> active;
     std::shared_ptr<const Song> song, pendingSong;
+    std::shared_ptr<const Mix> mix, pendingMix;
     mutable juce::SpinLock songLock;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JoeysLabProcessor)
@@ -292,6 +384,7 @@ public:
                    .withResourceProvider ([] (const juce::String& url) { return serve (url); })
                    .withEventListener ("joeyslab_save", [] (juce::var v) { save (v); })
                    .withEventListener ("joeyslab_song", [this] (juce::var v) { receiveSong (v); })
+                   .withEventListener ("joeyslab_audio", [this] (juce::var v) { receiveMix (v); })
                    .withEventListener ("joeyslab_ready", [this] (juce::var) { sendHost (true); restoreSong(); }))
     {
         addAndMakeVisible (web);
@@ -313,7 +406,7 @@ public:
         soundsBtn.setToggleState (proc.pluginSounds, juce::dontSendNotification);
         midiBtn.setToggleState (proc.midiOut, juce::dontSendNotification);
         followBtn.setTooltip ("JoeysLab starts, stops and changes tempo with FL Studio");
-        soundsBtn.setTooltip ("Play JoeysLab's own sounds. Turn off to hear only the synths you route the MIDI to");
+        soundsBtn.setTooltip ("Play JoeysLab's own sounds in sync with FL. Turn off to hear only the synths you route the MIDI to");
         midiBtn.setTooltip ("Send each stem out as MIDI (drums on channel 10, other stems on 1, 2, 3...)");
         followBtn.onClick = [this] { proc.followHost = followBtn.getToggleState(); sendHost (true); };
         soundsBtn.onClick = [this] { proc.pluginSounds = soundsBtn.getToggleState(); sendHost (true); };
@@ -389,12 +482,15 @@ private:
         const double expected = lastPpq + (now - lastTime) * bpm / 60.0;
         const bool jumped = playing && lastPlaying && std::abs (ppq - expected) > 0.5;
         lastPpq = ppq; lastTime = now;
-        if (! force && ! jumped && playing == lastPlaying && std::abs (bpm - lastBpm) < 0.01) return;
+        const bool tickSend = playing && (now - lastSent) > 0.5;
+        if (! force && ! jumped && ! tickSend && playing == lastPlaying && std::abs (bpm - lastBpm) < 0.01) return;
+        lastSent = now;
         lastPlaying = playing; lastBpm = bpm;
         auto* o = new juce::DynamicObject();
         o->setProperty ("playing", playing);
         o->setProperty ("ppq", ppq);
         o->setProperty ("jump", jumped);
+        o->setProperty ("sr", proc.getSampleRateNow());
         o->setProperty ("bpm", bpm);
         o->setProperty ("follow", proc.followHost.load());
         o->setProperty ("sounds", proc.pluginSounds.load());
@@ -403,24 +499,29 @@ private:
 
     void receiveSong (const juce::var& v)
     {
-        auto s = std::make_shared<Song>();
-        s->totalSteps = (double) v.getProperty ("total", 128.0);
-        s->bpm = (double) v.getProperty ("bpm", 120.0);
-        if (auto* arr = v.getProperty ("tracks", {}).getArray())
-            for (auto& tv : *arr)
-            {
-                SongTrack t;
-                t.name = tv.getProperty ("name", "Stem").toString();
-                t.channel = juce::jlimit (1, 16, (int) tv.getProperty ("ch", 1));
-                t.enabled = (bool) tv.getProperty ("on", true);
-                if (auto* notes = tv.getProperty ("notes", {}).getArray())
-                    for (auto& nv : *notes)
-                        if (auto* a = nv.getArray(); a != nullptr && a->size() >= 4)
-                            t.notes.push_back ({ juce::jlimit (0, 127, (int) (*a)[0]), (double) (*a)[1], (double) (*a)[2], (float) (double) (*a)[3] });
-                s->tracks.push_back (std::move (t));
-            }
         proc.lastSongJson = juce::JSON::toString (v, true);
-        proc.setSong (s);
+        proc.setSong (parseSong (v));
+    }
+
+    void receiveMix (const juce::var& v)
+    {
+        auto m = std::make_shared<Mix>();
+        m->sampleRate = (double) v.getProperty ("sr", 44100.0);
+        m->totalSteps = (double) v.getProperty ("total", 128.0);
+        juce::MemoryOutputStream out;
+        const auto b64 = v.getProperty ("data", "").toString();
+        if (b64.isNotEmpty() && juce::Base64::convertFromBase64 (out, b64))
+        {
+            const int frames = (int) (out.getDataSize() / 4);
+            m->audio.setSize (2, frames);
+            auto* d = static_cast<const int16_t*> (out.getData());
+            for (int i = 0; i < frames; ++i)
+            {
+                m->audio.setSample (0, i, d[i * 2] / 32768.0f);
+                m->audio.setSample (1, i, d[i * 2 + 1] / 32768.0f);
+            }
+        }
+        proc.setMix (m);
     }
 
     void restoreSong()
@@ -484,7 +585,7 @@ private:
     std::vector<std::unique_ptr<DragChip>> chips;
     int seenVersion = -1;
     bool lastPlaying = false;
-    double lastBpm = 0, lastPpq = 0, lastTime = 0;
+    double lastBpm = 0, lastPpq = 0, lastTime = 0, lastSent = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JoeysLabEditor)
 };

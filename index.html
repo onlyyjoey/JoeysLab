@@ -1795,6 +1795,12 @@ function drawRoll(){
   if(S.range){const x0=KEYW+S.range[0]*sx,x1=KEYW+S.range[1]*sx;g.strokeStyle=C.hl;g.lineWidth=1.5;g.setLineDash([5,4]);g.strokeRect(x0+.75,HEAD+.75,x1-x0-1.5,H-HEAD-1.5);g.setLineDash([]);}
 }
 function roundRect(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath();}
+let PH_HOST=null,PH_RAF=null;
+function hostPlayhead(){PH_RAF=null;if(!PH_HOST||playing||!ROLLGEOM){if(!playing&&!MARQ)clearPH();drawWavePH(null);return;}
+  const T=totalSteps(),pos=mod((PH_HOST.ppq+(performance.now()-PH_HOST.t)/1000*PH_HOST.bpm/60)*4,T);
+  const ph=$('ph'),g=ph.getContext('2d'),dpr=window.devicePixelRatio||1;g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,ROLLGEOM.W,ROLLGEOM.H);drawWavePH(pos);
+  const x=KEYW+pos*ROLLGEOM.sx;g.fillStyle=themeColors().accent;g.fillRect(x,0,2,ROLLGEOM.H);g.beginPath();g.moveTo(x-5,0);g.lineTo(x+7,0);g.lineTo(x+1,8);g.fill();
+  PH_RAF=requestAnimationFrame(hostPlayhead);}
 function clearPH(){const ph=$('ph');ph.getContext('2d').clearRect(0,0,ph.width,ph.height);}
 function drawPlayhead(){
   if(!playing||!SESSION||!ROLLGEOM)return;const span=SESSION.b-SESSION.a;const el=((AC.currentTime-SESSION.t0)/SESSION.stepDur);const pos=el<0?-1:SESSION.a+mod(el,span);
@@ -2087,6 +2093,20 @@ async function renderStem(tracks){
   const b=await oc.startRendering();let pk=0;for(let c=0;c<b.numberOfChannels;c++){const d=b.getChannelData(c);for(let i=0;i<d.length;i++)pk=Math.max(pk,Math.abs(d[i]));}
   if(pk>.95){const k=.95/pk;for(let c=0;c<b.numberOfChannels;c++){const d=b.getChannelData(c);for(let i=0;i<d.length;i++)d[i]*=k;}}return b;
 }
+async function renderLoopForHost(sr){
+  await loadSamples();const sd=60/S.bpm/4,T=totalSteps(),len=T*sd,tail=2.5,N=Math.ceil(len*sr);
+  const oc=new OfflineAudioContext(2,Math.ceil((len+tail)*sr),sr);const real=AC,oh=OPENHAT;AC=oc;OPENHAT=null;
+  try{S.tracks.filter(t=>audible(t)&&t.notes&&t.notes.length).forEach(t=>{const bus=oc.createGain();bus.gain.value=((MIX[t.inst]||[.4])[0])*1.7*(t.vol==null?1:t.vol);const ws=oc.createWaveShaper();ws.curve=curveK(DRIVE_K[t.inst]||1.2);bus.connect(ws);ws.connect(oc.destination);
+      t.notes.forEach(n=>playTrackNote(t,bus,n,n.s*sd,n.d*sd));});
+    if(S.sample&&S.sample.buffer&&audible(S.sample)){const g=oc.createGain();g.gain.value=(S.sample.vol==null?1:S.sample.vol)*.9;g.connect(oc.destination);const ls=(S.sample.loopBars||4)*16;
+      for(let k=0;k*ls<T;k++){const src=oc.createBufferSource();src.buffer=S.sample.buffer;src.connect(g);const at=k*ls*sd;src.start(at,0);src.stop(at+Math.min(S.sample.buffer.duration,Math.min(ls,T-k*ls)*sd));}}
+  }finally{AC=real;OPENHAT=oh;}
+  const b=await oc.startRendering();const out=[0,1].map(c=>{const d=b.getChannelData(Math.min(c,b.numberOfChannels-1));const o=d.slice(0,N);for(let i=N;i<d.length;i++)o[(i-N)%N]+=d[i];return o;});
+  let pk=0;out.forEach(d=>{for(let i=0;i<d.length;i++)pk=Math.max(pk,Math.abs(d[i]));});const k=pk>.98?.98/pk:1;
+  const i16=new Int16Array(N*2);for(let i=0;i<N;i++){i16[2*i]=Math.round(clamp(out[0][i]*k,-1,1)*32767);i16[2*i+1]=Math.round(clamp(out[1][i]*k,-1,1)*32767);}
+  return {sr,total:T,frames:N,bytes:new Uint8Array(i16.buffer)};
+}
+function b64Bytes(u8){let s='';const C=0x8000;for(let i=0;i<u8.length;i+=C)s+=String.fromCharCode.apply(null,u8.subarray(i,i+C));return btoa(s);}
 function loadLame(){if(window.lamejs)return Promise.resolve(true);return new Promise(res=>{const sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js';sc.onload=()=>res(!!window.lamejs);sc.onerror=()=>res(false);document.head.appendChild(sc);});}
 function mp3Bytes(buf){const ch=Math.min(2,buf.numberOfChannels);const enc=new lamejs.Mp3Encoder(ch,buf.sampleRate,192);const i16=d=>{const o=new Int16Array(d.length);for(let i=0;i<d.length;i++){const x=clamp(d[i],-1,1);o[i]=x<0?x*32768:x*32767;}return o;};
   const L=i16(buf.getChannelData(0)),R=ch>1?i16(buf.getChannelData(1)):null;const parts=[];for(let i=0;i<L.length;i+=1152){const out=ch>1?enc.encodeBuffer(L.subarray(i,i+1152),R.subarray(i,i+1152)):enc.encodeBuffer(L.subarray(i,i+1152));if(out.length)parts.push(new Uint8Array(out));}
@@ -2602,19 +2622,26 @@ function init(){
 if(typeof document!=='undefined')init();
 /* ---- Plugin bridge: only active inside the JoeysLab VST3/AU ---- */
 (function(){const J=window.__JUCE__&&window.__JUCE__.backend;if(!J)return;
-  window.IN_PLUGIN=true;let HOST={playing:false,follow:true,sounds:true,bpm:120},byHost=false,starting=false,lastSong='';
+  window.IN_PLUGIN=true;let HOST={playing:false,follow:true,sounds:true,bpm:120,sr:0},lastSong='';
   setTimeout(()=>{try{loadSamples();}catch(e){}},500);
   const songForHost=()=>{let ch=0;const tracks=S.tracks.filter(t=>t.role!=='fx'&&t.notes&&t.notes.length).map(t=>{let c;if(t.role==='drums')c=10;else{ch++;if(ch===10)ch++;c=Math.min(16,ch);}return {name:t.name,ch:c,on:audible(t),notes:t.notes.map(n=>[n.p,+n.s.toFixed(4),+n.d.toFixed(4),+(n.v||.8).toFixed(3)])};});
     return {total:totalSteps(),bpm:S.bpm,tracks,session:sessionObj()};};
   const push=()=>{try{const o=songForHost();const j=JSON.stringify([o.total,o.bpm,o.tracks]);if(j===lastSong)return;lastSong=j;J.emitEvent('joeyslab_song',o);}catch(e){}};
   setInterval(push,300);
-  J.addEventListener('joeyslab_host',h=>{const was=HOST;HOST=h;
-    if(h.follow&&h.bpm&&Math.abs(h.bpm-S.bpm)>.05){S.bpm=Math.round(h.bpm*100)/100;const b=document.getElementById('bpm');if(b)b.value=Math.round(S.bpm);if(playing&&!byHost)restartIfPlaying();}
-    const want=h.follow&&h.playing&&h.sounds;
-    if(want&&h.jump&&playing&&byHost&&!starting){stopPlay();starting=true;startPlay(((h.ppq||0)*4)%Math.max(1,totalSteps())).then(()=>{starting=false;});return;}
-    if(want&&!playing&&!starting){byHost=true;starting=true;startPlay(((h.ppq||0)*4)%Math.max(1,totalSteps())).then(()=>{starting=false;if(!(HOST.follow&&HOST.playing&&HOST.sounds)&&playing){byHost=false;stopPlay();}});}
-    else if(!want&&playing&&byHost){byHost=false;stopPlay();}
-    if(!playing&&!starting)byHost=false;});
+  /* Plugin sounds: render the full mix and hand it to the plugin, which plays it locked to FL's playhead */
+  let mixKey='',mixBusy=false,mixDirty=false,mixT=null;
+  const mixSig=()=>JSON.stringify([HOST.sr,S.bpm,totalSteps(),S.tracks.map(t=>[t.inst,t.smp,t.preset,t.kit,t.vol,audible(t),t.notes.length,t.notes.map(n=>n.p+n.s*7+n.d*3+(n.v||0)).reduce((a,b)=>a+b,0)]),S.sample?[S.sample.buffer&&S.sample.buffer.length,S.sample.vol,audible(S.sample)]:0]);
+  const renderMix=async()=>{if(!HOST.sounds||!HOST.sr)return;if(mixBusy){mixDirty=true;return;}const sig=mixSig();if(sig===mixKey)return;mixBusy=true;
+    try{if(!S.tracks.length&&!S.sample){J.emitEvent('joeyslab_audio',{sr:HOST.sr,total:totalSteps(),frames:0,data:''});}
+      else{const r=await renderLoopForHost(HOST.sr);J.emitEvent('joeyslab_audio',{sr:r.sr,total:r.total,frames:r.frames,data:b64Bytes(r.bytes)});}
+      mixKey=sig;}catch(e){console.error(e);}mixBusy=false;if(mixDirty){mixDirty=false;schedule();}};
+  let lastSig='';const schedule=()=>{clearTimeout(mixT);mixT=setTimeout(()=>{mixT=null;renderMix();},450);};
+  setInterval(()=>{if(HOST.follow&&HOST.bpm&&Math.abs(HOST.bpm-S.bpm)>.05){S.bpm=Math.round(HOST.bpm*100)/100;const bb=document.getElementById('bpm');if(bb)bb.value=Math.round(S.bpm);}},250);
+  setInterval(()=>{if(!HOST.sounds||!HOST.sr||mixBusy)return;const sg=mixSig();if(sg===mixKey)return;if(sg!==lastSig||!mixT){lastSig=sg;schedule();}},300);
+  J.addEventListener('joeyslab_host',h=>{HOST=Object.assign({},HOST,h);
+    if(h.follow&&h.bpm&&Math.abs(h.bpm-S.bpm)>.05){S.bpm=Math.round(h.bpm*100)/100;const bb=document.getElementById('bpm');if(bb)bb.value=Math.round(S.bpm);}
+    if(h.playing&&playing)stopPlay();   /* FL is playing: the plugin plays the mix, so stop the app's own preview */
+    PH_HOST=h.playing?{ppq:h.ppq||0,bpm:h.bpm||120,t:performance.now()}:null;if(!PH_RAF)PH_RAF=requestAnimationFrame(hostPlayhead);});
   J.addEventListener('joeyslab_restore',v=>{if(v&&v.session&&v.session.tracks&&v.session.tracks.length&&!S.tracks.length){AS_HOLD=false;restoreSession(v.session).then(()=>{toast('Loaded this project\'s JoeysLab song.');});}});
   setTimeout(()=>J.emitEvent('joeyslab_ready',{}),300);
 })();
