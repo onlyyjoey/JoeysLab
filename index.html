@@ -1380,11 +1380,12 @@ function updateGains(){if(!SESSION)return;S.tracks.forEach(t=>{const c=SESSION.c
 function loopBounds(){if(S.loop&&S.range)return[S.range[0],Math.min(totalSteps(),S.range[1])];return[0,totalSteps()];}
 let INDEX={};
 function buildIndex(){INDEX={};S.tracks.forEach(t=>{const m={};t.notes.forEach(n=>{const k=Math.floor(n.s+1e-6);(m[k]=m[k]||[]).push(n);});INDEX[t.id]=m;});}
-async function startPlay(){
+async function startPlay(from){
   ensureAudio();
   if(!SAMP_P||!SAMP_OK){if(!SAMP_P)toast('Loading your sounds…');await loadSamples();if(playing)return;}
   const bus=AC.createGain(),busR=AC.createGain(),busD=AC.createGain();bus.connect(OUT);busR.connect(REV);busD.connect(DLY);
   const LB=loopBounds();SESSION={bus,busR,busD,chans:{},stepDur:60/S.bpm/4,next:LB[0],a:LB[0],b:LB[1],nextT:AC.currentTime+.08,sources:[]};
+  if(from!=null&&isFinite(from)){const c=Math.ceil(from-1e-6);SESSION.next=c>=LB[1]||c<LB[0]?LB[0]:c;SESSION.nextT+=(c-from)*SESSION.stepDur;}
   SESSION.t0=SESSION.nextT;DLYNODE.delayTime.setValueAtTime(Math.min(1.9,60/S.bpm*.75),AC.currentTime);
   S.tracks.forEach(t=>chanFor(t.id,t.inst,t));if(S.sample)chanFor('sample','sample');updateGains();
   buildIndex();playing=true;timer=setInterval(tick,25);tick();
@@ -2274,8 +2275,8 @@ async function autosave(){
     for(const k of Object.keys(AS_IDS))if(!(k in want)){await IDB.del(k);delete AS_IDS[k];}
   }finally{AS_BUSY=false;}
 }
-async function restoreSession(){
-  let o=null;try{o=JSON.parse(localStorage.getItem('joeyslab-session')||'null');}catch(e){}
+async function restoreSession(given){
+  let o=given||null;if(!o){try{o=JSON.parse(localStorage.getItem('joeyslab-session')||'null');}catch(e){}}
   if(!o||!o.tracks)return false;
   Object.assign(S,{style:STYLES[o.style]?o.style:S.style,key:o.key,mode:o.mode,bars:o.bars,bpm:o.bpm,prog:o.prog,importChords:o.importChords||null});
   S.tracks=o.tracks.map(t=>Object.assign({},t,{id:'t'+(TID++)}));S.sel=S.tracks[0]?S.tracks[0].id:null;
@@ -2599,6 +2600,23 @@ function init(){
   Promise.resolve().finally(()=>{setInterval(autosave,2500);window.addEventListener('pagehide',()=>{if(AS_OFF||AS_HOLD)return;try{localStorage.setItem('joeyslab-session',JSON.stringify(sessionObj()));}catch(e){}});});
 }
 if(typeof document!=='undefined')init();
+/* ---- Plugin bridge: only active inside the JoeysLab VST3/AU ---- */
+(function(){const J=window.__JUCE__&&window.__JUCE__.backend;if(!J)return;
+  window.IN_PLUGIN=true;let HOST={playing:false,follow:true,sounds:true,bpm:120},byHost=false,starting=false,lastSong='';
+  setTimeout(()=>{try{loadSamples();}catch(e){}},500);
+  const songForHost=()=>{let ch=0;const tracks=S.tracks.filter(t=>t.role!=='fx'&&t.notes&&t.notes.length).map(t=>{let c;if(t.role==='drums')c=10;else{ch++;if(ch===10)ch++;c=Math.min(16,ch);}return {name:t.name,ch:c,on:audible(t),notes:t.notes.map(n=>[n.p,+n.s.toFixed(4),+n.d.toFixed(4),+(n.v||.8).toFixed(3)])};});
+    return {total:totalSteps(),bpm:S.bpm,tracks,session:sessionObj()};};
+  const push=()=>{try{const o=songForHost();const j=JSON.stringify([o.total,o.bpm,o.tracks]);if(j===lastSong)return;lastSong=j;J.emitEvent('joeyslab_song',o);}catch(e){}};
+  setInterval(push,300);
+  J.addEventListener('joeyslab_host',h=>{const was=HOST;HOST=h;
+    if(h.follow&&h.bpm&&Math.abs(h.bpm-S.bpm)>.05){S.bpm=Math.round(h.bpm*100)/100;const b=document.getElementById('bpm');if(b)b.value=Math.round(S.bpm);if(playing&&!byHost)restartIfPlaying();}
+    const want=h.follow&&h.playing&&h.sounds;
+    if(want&&!playing&&!starting){byHost=true;starting=true;startPlay(((h.ppq||0)*4)%Math.max(1,totalSteps())).then(()=>{starting=false;if(!(HOST.follow&&HOST.playing&&HOST.sounds)&&playing){byHost=false;stopPlay();}});}
+    else if(!want&&playing&&byHost){byHost=false;stopPlay();}
+    if(!playing&&!starting)byHost=false;});
+  J.addEventListener('joeyslab_restore',v=>{if(v&&v.session&&v.session.tracks&&v.session.tracks.length&&!S.tracks.length){AS_HOLD=false;restoreSession(v.session).then(()=>{toast('Loaded this project\'s JoeysLab song.');});}});
+  setTimeout(()=>J.emitEvent('joeyslab_ready',{}),300);
+})();
 if('serviceWorker' in navigator&&location.protocol==='https:'&&!(window.claude)){navigator.serviceWorker.register('sw.js').catch(()=>{});}
 </script>
 </body>
