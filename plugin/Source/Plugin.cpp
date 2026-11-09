@@ -7,6 +7,10 @@ namespace
 {
 juce::File webRoot()
 {
+    // Live copy first: ~/JUCE/JoeysLab (updated directly, no rebuild needed). Falls back to the copy inside the plugin.
+    auto live = juce::File::getSpecialLocation (juce::File::userHomeDirectory).getChildFile ("JUCE/JoeysLab");
+    if (live.getChildFile ("index.html").existsAsFile() && live.getChildFile ("samples").isDirectory())
+        return live;
     auto bundle = juce::File::getSpecialLocation (juce::File::currentApplicationFile);
     auto dir = bundle.getChildFile ("Contents/Resources/web");
     if (! dir.isDirectory())
@@ -287,6 +291,11 @@ public:
                    .withEventListener ("joeyslab_ready", [this] (juce::var) { sendHost (true); restoreSong(); }))
     {
         addAndMakeVisible (web);
+        addAndMakeVisible (reloadBtn);
+        reloadBtn.setColour (juce::TextButton::buttonColourId, kLine);
+        reloadBtn.setColour (juce::TextButton::textColourOffId, kText);
+        reloadBtn.setTooltip ("Reload JoeysLab to pick up the latest update");
+        reloadBtn.onClick = [this] { web.goToURL (juce::WebBrowserComponent::getResourceProviderRoot()); };
         for (auto* b : { &followBtn, &soundsBtn, &midiBtn })
         {
             addAndMakeVisible (*b);
@@ -337,6 +346,8 @@ public:
         auto r = getLocalBounds();
         auto bar = r.removeFromBottom (barH).reduced (8, 7);
         web.setBounds (r);
+        reloadBtn.setBounds (bar.removeFromRight (70));
+        bar.removeFromRight (8);
         followBtn.setBounds (bar.removeFromLeft (92)); bar.removeFromLeft (6);
         soundsBtn.setBounds (bar.removeFromLeft (98)); bar.removeFromLeft (6);
         midiBtn.setBounds (bar.removeFromLeft (78));   bar.removeFromLeft (10);
@@ -458,6 +469,7 @@ private:
 
     JoeysLabProcessor& proc;
     juce::WebBrowserComponent web;
+    juce::TextButton reloadBtn { juce::String (juce::CharPointer_UTF8 ("\xe2\x86\xbb Reload")) };
     juce::TextButton followBtn { "Follow FL" }, soundsBtn { "Plugin sounds" }, midiBtn { "MIDI out" };
     juce::Label status, dragLabel;
     std::vector<std::unique_ptr<DragChip>> chips;
