@@ -329,6 +329,9 @@ body.dragging .app{outline:2px dashed var(--hl);outline-offset:4px;border-radius
       <button class="btn add" id="addDrums" data-tip="Generate drums that fit your loop">+ Drums</button>
       <button class="btn add" id="addBass" data-tip="Generate a bassline from your loop's chords">+ Bass</button>
       <button class="btn add" id="add808" data-tip="Generate an 808 line from your loop's chords">+ 808</button>
+      <button class="btn add" id="addCounter" data-tip="Scans the loop's notes and writes a counter melody that answers it in the gaps">+ Counter</button>
+      <button class="btn add" id="addCandy" data-tip="Guitar ear candy dropped into the loop's gaps, like guitar samples on a Don Toliver beat">+ Ear candy</button>
+      <button class="btn keep" id="buildBeat" data-tip="One click: drums, 808, counter melody and guitar ear candy built around your loop, then auto-mixed">✦ Build beat</button>
       <button class="btn" id="toMidi" data-tip="Turn the loop's melody into a MIDI stem (works best on vocals or single notes)">→ MIDI</button>
     </div>
     <div class="stools chopbar" id="chopBar" hidden>
@@ -528,13 +531,13 @@ const STYLES={
       {role:'chords',name:'Analog Pad',inst:'pad',mode:'sustain',center:60},
       {role:'bass808',name:'808',inst:'808',glide:.2},
       {role:'drums',name:'Drums',inst:'drums',pattern:'psych'},{role:'fx',name:'FX',inst:'sfx'}]},
-  clams:{name:'Cloud',ref:'Clams Casino-type · washed pads, vocal chops, huge slow snares',kit:'cloud',samp:{sub:'bass-hateme'},bpm:[66,80],harmV:.1,ext:{'9':.5,'7':.4,add9:.1},drums:'cloud',
+  clams:{name:'Cloud',ref:'A$AP Rocky x Clams Casino-type · hazy pitched vocal chops with stutters, washed pads, hard half-time drums, deep 808s',kit:'cloud',samp:{'808':'808-ian'},bpm:[96,110],harmV:.1,ext:{'9':.5,'7':.4,add9:.1},drums:'rocky',
     prog:{minor:[[0,5,0,5],[0,2,5,3],[5,5,0,0],[0,3,0,5],[0,6,5,5]],major:[[0,3,0,3],[3,5,0,0],[0,2,3,3],[5,3,0,0]]},
     stems:[{role:'chords',name:'Ambient Wash',inst:'wash',mode:'sustain',center:62},
-      {role:'melody',name:'Vox Chops',inst:'vox',rhythm:'chop',center:72},
-      {role:'sub',name:'Sub Bass',inst:'sub'},
-      {role:'earcandy',name:'Ear Candy',inst:'bell',center:84},
-      {role:'drums',name:'Drums',inst:'drums',pattern:'cloud'},{role:'fx',name:'FX',inst:'sfx'}]},
+      {role:'melody',name:'Vox Chops',inst:'vox',rhythm:'chop',center:70,stutter:.35},
+      {role:'counter',name:'Hazy Lead',inst:'slead',center:76,density:.6},
+      {role:'bass808',name:'808',inst:'808',glide:.15},
+      {role:'drums',name:'Drums',inst:'drums',pattern:'rocky'},{role:'fx',name:'FX',inst:'sfx'}]},
   hyper:{name:'Hyper',ref:'Brakence-type · crunchy glitch leads, granular chops, growl drops, emo guitar, broken drums',kit:'brak',samp:{'808':'808-brdrop'},bpm:[156,170],harmV:.05,ext:{'7':.45,'9':.35,add9:.2},drums:'brak',
     prog:{minor:[[5,0,5,0],[5,3,0,6],[2,5,0,6],[5,6,2,0],[3,5,3,5]],major:[[3,5,3,5],[3,2,5,0],[3,0,5,4],[1,3,0,5],[3,4,2,5]]},
     stems:[{role:'melody',name:'Glitch Lead',inst:'wavy',rhythm:'brak',center:76,vol:.5},
@@ -558,6 +561,9 @@ const ADDABLE=[
   {k:'sine',role:'melody',name:'Mike Dean Sine',inst:'mdsine',rhythm:'hum',center:69},
   {k:'arp',role:'arp',name:'Synth Arp',inst:'pluck',rate:1,center:70},
   {k:'gtr',role:'arp',name:'Guitar Arps',inst:'guitar',rate:2,center:62,ring:true},
+  {k:'scounter',role:'counter',name:'Counter Melody',inst:'slead',center:76,fromSample:true},
+  {k:'gtrcandy',role:'earcandy',name:'Guitar Ear Candy',inst:'guitar',center:72,fromSample:true},
+  {k:'bellcandy',role:'earcandy',name:'Bell Ear Candy',inst:'bell',center:79,fromSample:true},
   {k:'pad',role:'chords',name:'Pad',inst:'pad',mode:'sustain',center:60},
   {k:'stabs',role:'chords',name:'Chord Stabs',inst:'stab',mode:'chops',center:64},
   {k:'strings',role:'chords',name:'Strings',inst:'strings',mode:'sustain',center:72},
@@ -651,7 +657,7 @@ const MATCH={
   cudi:{y:['ride-nx1'],u:['tom-nx3hi','tom-lijk'],slead:['lead-shadow','lead-wistful2','lead-disconnect2'],fx:{impact:['sfx-impact1','sfx-impact2'],riser:['sfx-riser5','sfx-riser4'],atmo:['sfx-atmo1','sfx-atmo-jbgiantgnome','sfx-atmo-jbnautilus','sfx-atmo2','sfx-atmo-nxlightning'],texture:['sfx-texture1','sfx-texture2']},k:['kick-smoke','kick-deep','kick-cross','kick-nx1'],s:['snare-famous','snare-newer','snare-layerthis','snare-nx4'],s2:['snare-sanity','snare-newer'],c:['clap-arella','clap-sincity','clap-nx3'],h:['hat-swag','hat-tyler','hat-fade'],o:['open-novacane'],r:['rim-layer'],t:['tom-backup','tom-lijk','tom-nx3lo'],p:['perc-hype','perc-filler'],q:['perc-filler','perc-hype'],f:['fx-jack'],
     vox:['vox-ahh','vox-oh'],bell:['bell-glass','bell-dark','lead-fass11','lead-fass03'],earcandy:['bell-glass','lead-jbshinyteeth','bell-dark'],synthbass:['bx-motion2','bx-fass12','bass-minimoog','bx-saw','bx-fass08','bx-fass27'],'808':['808-ian','808-eagle']},
   clams:{y:['ride-nx2'],u:['tom-nx3mid','tom-lijk'],slead:['lead-wistful2','lead-stroll2','lead-shadow'],fx:{impact:['sfx-impact1','sfx-impact2'],riser:['sfx-riser7','sfx-riser6'],atmo:['sfx-atmo1','sfx-atmo-jbwhopperchopper','sfx-atmo-jbfrownupsidedown','sfx-atmo-nxlightning','sfx-atmo2'],texture:['sfx-texture1','sfx-texture2','sfx-texture-nxclink']},k:['kick-555','kick-deep','kick-smoke'],s:['snare-pimpala','snare-impala','snare-petrol','snare-nx3g'],s2:['snare-impala','snare-petrol'],c:['clap-sincity','clap-arella'],h:['hat-fade','hat-nonono','hat-dirty','hat-nx4'],o:['open-psshhh'],r:['rim-mer'],t:['tom-sure','tom-backup'],p:['perc-sense','perc-us'],q:['perc-us','perc-sense'],f:['fx-jack','fx-nxcrash2'],
-    vox:['vox-mix','vox-ahh'],bell:['bell-dark','lead-fass03','bell-glass'],earcandy:['bell-dark','vox-high','lead-fass11','lead-jbfallensky'],sub:['bx-sub','bx-fass16','bass-hateme','bx-hollow2','bx-fass23','bx-fass18'],'808':['808-bird','808-ian']},
+    vox:['vox-mix','vox-ahh'],bell:['bell-dark','lead-fass03','bell-glass'],earcandy:['bell-dark','vox-high','lead-fass11','lead-jbfallensky'],sub:['bx-sub','bx-fass16','bass-hateme','bx-hollow2','bx-fass23','bx-fass18'],'808':['808-ian','808-adlsilkface','808-bird','808-adlwhatiwantsub']},
   hyper:{synthbass:['bx-fass04','bx-fass10'],gran:['lead-fantasy2','lead-jbangrycat','lead-wistful','vox-high','lead-stroll','lead-fass21','lead-jbshinyteeth','lead-fass08'],slead:['lead-fantasy2','lead-jbharshping','lead-jbscatterbrain','lead-jbrobotrock','lead-wistful','lead-stroll'],fx:{impact:['sfx-impact3','sfx-impact4','sfx-impact-nxslam'],riser:['sfx-riser-brflex','sfx-riser2','sfx-riser1'],atmo:['sfx-atmo2','sfx-atmo1'],texture:['sfx-texture-brscratch','sfx-texture-fass24','sfx-texture2','sfx-texture-nxsilly']},k:['kick-once','kick-brargyle1','kick-brfwb','kick-brdrop'],s:['snare-300lbs','snare-brfwbpunk','snare-brargyle1','snare-brflex'],s2:['snare-jokey','snare-brflextiny','snare-brflex2'],c:['clap-arella','clap-brzap','clap-brfwb'],h:['hat-nonono','hat-brdrop1','hat-brargyle','hat-brfwb'],o:['open-novacane','open-brargyle2','open-brdrop1'],r:['rim-layer','rim-brfwbpunk','rim-brflexlofi'],t:['tom-lijk','tom-nx1hi'],u:['tom-nx3hi','tom-lijk'],p:['perc-brclickity','perc-brclackity','perc-bing'],q:['perc-brflexnoise','perc-brargylenoise','perc-fass32'],f:['fx-crow','fx-nxcrash3'],y:['ride-nx1'],
     vox:['vox-high','vox-oh'],bell:['bell-musicbox','bell-glass'],earcandy:['bell-musicbox','vox-high','lead-jbharshping','lead-jbluckypig','lead-jbfrogspeak'],'808':['808-brdrop','808-brflex','808-brargyle','808-hpfwb']},
   post:{slead:['lead-crisis','lead-fass19','lead-crisis2','lead-shadow','lead-stroll2','lead-jbfactoryset','lead-jbleggomyeggo'],fx:{impact:['sfx-impact-nxexplode','sfx-impact-nxslam','sfx-impact2'],riser:['sfx-riser4','sfx-riser6'],atmo:['sfx-atmo-nxlightning','sfx-atmo1','sfx-atmo-jbolympus'],texture:['sfx-texture-nxclink','sfx-texture1']},k:['kick-nx2g','kick-nx4g','kick-nx1g','kick-nx3'],s:['snare-nx3g','snare-nx2g','snare-nx5g'],s2:['snare-nx1','snare-nx4'],c:['clap-nx1','clap-nx2','clap-nx3'],h:['hat-nx2','hat-nx1','hat-nx5'],o:['open-nx2','open-nx3'],r:['rim-layer','rim-mer'],t:['tom-nx3lo','tom-nxlo'],u:['tom-nx3mid','tom-nx3hi'],p:['perc-nxcowbell','perc-nxbongolo'],q:['perc-nxbongohi','perc-nxgrim'],f:['fx-nxcrash1','fx-nxcrash3'],y:['ride-nx2','ride-nx1'],
@@ -986,7 +992,7 @@ function genFx(t,r){const N=[];const T=totalSteps();const sd=60/S.bpm/4;const le
   const ends=S.bars>=8?[64,T]:[T];ends.forEach(e=>{if(e===64&&!chance(r,.7))return;N.push({p:61,s:Math.max(0,e-len),d:Math.min(len,e),v:.75});if(e<T)N.push({p:60,s:e,d:Math.min(len,T-e),v:.8});});
   if(chance(r,.35)){const s2=pick(r,[24,40,88].filter(x=>x<T-4));if(s2!=null)N.push({p:63,s:s2,d:Math.min(len,T-s2),v:.5});}
   return N.sort((a,b)=>a.s-b.s);}
-const GEN={fx:genFx,chops:(t,r)=>genChops(t,r),drums:genDrums,chords:genChords,arp:genArp,melody:(t,r)=>t.rhythm==='adl'?genAdlMelody(t,r):genMelody(t,r),counter:(t,r)=>t.inst==='gran'?genGran(t,r):t.adl?genAdlCounter(t,r):genCounter(t,r),earcandy:(t,r)=>t.adlBell?genAdlBell(t,r):genEarCandy(t,r),solo:genSolo,bass808:genBass808,bass:genBass,sub:genSub};
+const GEN={fx:genFx,chops:(t,r)=>genChops(t,r),drums:genDrums,chords:genChords,arp:genArp,melody:(t,r)=>t.rhythm==='adl'?genAdlMelody(t,r):genMelody(t,r),counter:(t,r)=>t.fromSample&&S.sample&&S.sample.melLine?genSampleCounter(t,r):t.inst==='gran'?genGran(t,r):t.adl?genAdlCounter(t,r):genCounter(t,r),earcandy:(t,r)=>t.fromSample&&S.sample&&S.sample.melLine?genSampleEarCandy(t,r):t.adlBell?genAdlBell(t,r):genEarCandy(t,r),solo:genSolo,bass808:genBass808,bass:genBass,sub:genSub};
 let TID=1;
 function makeTrack(spec,ci){
   const t=Object.assign({},spec);delete t.k;t.id='t'+(TID++);t.seed=newSeed();t.notes=[];t.mute=false;t.solo=false;
@@ -1002,7 +1008,7 @@ function makeTrack(spec,ci){
 }
 function nextCi(){const used=S.tracks.map(x=>x.ci);for(let i=0;i<10;i++)if(!used.includes(i))return i;return S.tracks.length%10;
 }
-function regenTrack(t){const r=rngFrom(t.seed);t.notes=GEN[t.role](t,r);if(t.bounce&&t.notes.length)t.notes=addBounce(t.notes,r,t.bounce);}
+function regenTrack(t){const r=rngFrom(t.seed);t.notes=GEN[t.role](t,r);if(t.bounce&&t.notes.length)t.notes=addBounce(t.notes,r,t.bounce);if(t.stutter&&t.notes.length)t.notes=addStutter(t.notes,r,t.stutter);}
 function regenAll(){deriveChords();S.tracks.slice().sort((a,b)=>ORDER[a.role]-ORDER[b.role]).forEach(regenTrack);}
 function refitDependents(t){const deps=DEPENDS[t.role]||[];S.tracks.filter(x=>deps.includes(x.role)).sort((a,b)=>ORDER[a.role]-ORDER[b.role]).forEach(regenTrack);}
 const GEN_MODES={melody:{label:'Melody',sub:'just a melody',roles:['melody']},starter:{label:'Starter',sub:'drums, melody, bass / low end',roles:['drums','melody','bass808','bass','sub']},full:{label:'Full song',sub:'every stem for this style',roles:null}};
@@ -2055,6 +2061,46 @@ function analyzeBass(buf,bpm,bars){
   const out=raw.map((r,i)=>{if(r.e<emax*.18)return null;const w=[raw[i-1],r,raw[i+1]].filter(x=>x&&x.e>=emax*.18).map(x=>mod(x.p,12));const cnt={};w.forEach(pc=>cnt[pc]=(cnt[pc]||0)+1);let pc=mod(r.p,12),bc=0;Object.keys(cnt).forEach(k=>{if(cnt[k]>bc){bc=cnt[k];pc=+k;}});return{pc,p:r.p};});
   return out;
 }
+/* Scans the loop's lead notes per 16th (G3..E6): pitch by harmonic salience, energy and onsets */
+function analyzeMelody(buf,bpm,bars){
+  const f=2,{y,sr}=downsample(monoData(buf),buf.sampleRate,buf.sampleRate/f);const N=2048,win=new Float32Array(N);for(let i=0;i<N;i++)win[i]=.5-.5*Math.cos(2*Math.PI*i/(N-1));
+  const sd=60/bpm/4,T=bars*16,re=new Float32Array(N),im=new Float32Array(N);const raw=[];let emax=1e-9;
+  const magAt=(mag,fq)=>{const k=fq*N/sr;const k0=Math.floor(k);if(k0<1||k0+1>=N/2)return 0;const fr=k-k0;return mag[k0]*(1-fr)+mag[k0+1]*fr;};
+  for(let st=0;st<T;st++){const c=Math.floor(((st+.5)*sd)*sr)-N/2;re.fill(0);im.fill(0);for(let i=0;i<N;i++){const j=c+i;if(j>=0&&j<y.length)re[i]=y[j]*win[i];}fft(re,im);
+    const mag=new Float32Array(N/2);let e=0;for(let k=1;k<N/2;k++){mag[k]=Math.hypot(re[k],im[k]);const fq=k*sr/N;if(fq>220&&fq<2600)e+=mag[k];}
+    let best=null;for(let m=55;m<=88;m++){const f0=440*Math.pow(2,(m-69)/12);const sal=magAt(mag,f0)+.5*magAt(mag,2*f0)+.3*magAt(mag,3*f0)-.35*magAt(mag,f0/2);if(!best||sal>best.sal)best={m,sal};}
+    raw.push({p:best.m,e});emax=Math.max(emax,e);}
+  const pc=raw.map((r,i)=>{const w=[raw[i-1],r,raw[i+1]].filter(Boolean).map(x=>mod(x.p,12));const c={};w.forEach(v=>c[v]=(c[v]||0)+1);let b=mod(r.p,12),bc=0;Object.keys(c).forEach(k=>{if(c[k]>bc){bc=c[k];b=+k;}});return b;});
+  let lastP=null;const out=raw.map((r,i)=>{if(r.e<emax*.22){lastP=null;return null;}let p=r.p-mod(r.p,12)+pc[i];if(lastP!=null){while(p-lastP>7)p-=12;while(lastP-p>7)p+=12;}p=clamp(p,55,88);
+    const prev=raw[i-1];const on=!prev||prev.e<emax*.22||r.e>prev.e*1.3||(pc[i-1]!==pc[i]&&pc[i+1]===pc[i]);lastP=p;return{p,e:r.e/emax,on};});
+  return out;
+}
+function sampleMelAt(s){const sm=S.sample;if(!sm||!sm.melLine||!sm.melLine.length)return null;return sm.melLine[mod(Math.floor(s),sm.melLine.length)]||null;}
+/* Counter melody that answers the loop: echoes its last notes a third/sixth away in the gaps, harmonises held notes */
+function genSampleCounter(t,r){
+  const T=totalSteps(),N=[],center=t.center||76;let last=[];
+  for(let s=0;s<T;s+=1){const m=sampleMelAt(s);if(m&&m.on){last.push(m.p);if(last.length>4)last.shift();}
+    const quiet=[0,1,2].every(k=>{const x=sampleMelAt(s+k+1);return !x||!x.on||x.e<.3;});
+    if(quiet&&last.length&&s%2===0&&r()<.7){const shift=pick(r,[2,-2,5,-3]);const n=Math.min(last.length,rint(r,2,4));
+      for(let i=0;i<n&&s+i*2<T;i++){let pch=scaleIdxToPitch(pitchToIdx(last[last.length-n+i])+shift);while(pch>center+9)pch-=12;while(pch<center-9)pch+=12;pch=nearestChordTone(ctxChord(s+i*2),pch);N.push({p:pch,s:s+i*2,d:2,v:.62+r()*.12});}
+      s+=n*2+2;last=[];continue;}
+    if(m&&m.on&&s%8===0&&r()<.35){let pch=scaleIdxToPitch(pitchToIdx(m.p)+pick(r,[2,5]));while(pch>center+9)pch-=12;while(pch<center-9)pch+=12;N.push({p:nearestChordTone(ctxChord(s),pch),s,d:4,v:.55});s+=3;}}
+  return N;
+}
+/* Ear candy for loops: guitar/bell licks dropped into the biggest gap of each 2 bars, like guitar samples on a Don Toliver beat */
+function genSampleEarCandy(t,r){
+  const T=totalSteps(),N=[],center=t.center||72;
+  for(let b0=0;b0<T;b0+=32){let best=-1,bl=0;for(let s=b0;s<Math.min(T,b0+32);s++){let l=0;while(s+l<T&&s+l<b0+32){const x=sampleMelAt(s+l);if(x&&x.on&&x.e>=.3&&l>0)break;l++;}if(l>bl){bl=l;best=s+1;}}
+    if(bl<3||r()<.15)continue;const s0=best+(bl>6?pick(r,[0,1,2]):0);const ch=ctxChord(s0);const tones=[];let p=nearestChordTone(ch,center-4);for(let i=0;i<6;i++){tones.push(p);p=nearestChordTone(ch,p+3);if(p<=tones[i])p=tones[i]+3;p=nearestChordTone(ch,p);}
+    const kind=pick(r,['rise','swell','trip','fall']);
+    if(kind==='rise'){const n=Math.min(bl-1,rint(r,3,5));for(let i=0;i<n;i++)N.push({p:tones[i],s:s0+i,d:i===n-1?Math.max(2,Math.min(4,bl-n)):1,v:.55+i*.05});}
+    else if(kind==='swell')N.push({p:tones[pick(r,[1,2,3])],s:s0,d:Math.min(8,bl),v:.7});
+    else if(kind==='trip'){for(let i=0;i<3;i++)N.push({p:tones[i+1],s:s0+i*2/3,d:2/3,v:.55});N.push({p:tones[4],s:s0+2,d:Math.min(4,bl-2),v:.62});}
+    else{const n=Math.min(4,bl);for(let i=0;i<n;i++)N.push({p:tones[n-i],s:s0+i,d:1,v:.6-i*.04});}}
+  return N.filter(n=>n.s<T);
+}
+/* Rocky-style stutters: some held chops repeat their start on 16ths */
+function addStutter(N,r,amt){const out=[];N.forEach(n=>{if(n.d>=2&&r()<amt){const k=Math.min(Math.floor(n.d),pick(r,[2,3,3,4]));for(let i=0;i<k;i++)out.push(Object.assign({},n,{s:n.s+i,d:1,v:n.v*(i?0.85:1)}));if(n.d>k)out.push(Object.assign({},n,{s:n.s+k,d:n.d-k}));}else out.push(n);});return out;}
 function sampleBassAt(s){const sm=S.sample;if(!sm||!sm.bassLine||!sm.bassLine.length)return null;return sm.bassLine[mod(Math.floor(s),sm.bassLine.length)]||null;}
 function sampleBassChanges(){const sm=S.sample;if(!sm||!sm.bassLine)return[];const out=[];const T=totalSteps();
   for(let s=0;s<T;s++){const a=sampleBassAt(s),b=sampleBassAt(s-1),c=sampleBassAt(s+1);if(a&&(!b||b.pc!==a.pc)&&c&&c.pc===a.pc)out.push(s);}return out;}
@@ -2140,13 +2186,13 @@ async function applyPlan(plan,o){
   const wasPlaying=playing;stopPlay();panic();
   const firstLoop=!S.sample||!S.sample.isFlip||o.fresh;
   if(firstLoop){snap();S.tracks=[];S.range=null;S.loop=false;NSEL.clear();}
-  if(o.refit==='edit'&&S.sample&&S.sample.isFlip){S.sample.buffer=buf;S.sample.plan=plan;S.sample.bassLine=analyzeBass(buf,plan.bpm,plan.len);
+  if(o.refit==='edit'&&S.sample&&S.sample.isFlip){S.sample.buffer=buf;S.sample.plan=plan;S.sample.bassLine=analyzeBass(buf,plan.bpm,plan.len);S.sample.melLine=analyzeMelody(buf,plan.bpm,plan.len);
     S.tracks.filter(t=>['bass','bass808','sub'].includes(t.role)).forEach(regenTrack);WAVEPEAKS=null;renderTracks();drawRoll();drawWave();buildIndex();renderSamplerRows();if(wasPlaying&&!o.noRestart)startPlay();return;}
   S.bpm=plan.bpm;
   const res=analyzeAudio(buf,String(Math.min(8,plan.len)),STYLES[S.style].bpm,plan.bpm);S.key=res.key;S.mode=res.mode;
   const vol=S.sample&&S.sample.vol!=null?S.sample.vol:1;
   S.sample={buffer:buf,name:src.name,loopBars:plan.len,chords:[],mute:false,solo:false,vol,slices:[],isFlip:true,plan};
-  S.sample.changes=chordChanges(buf,plan.bpm);S.sample.bassLine=analyzeBass(buf,plan.bpm,plan.len);
+  S.sample.changes=chordChanges(buf,plan.bpm);S.sample.bassLine=analyzeBass(buf,plan.bpm,plan.len);S.sample.melLine=analyzeMelody(buf,plan.bpm,plan.len);
   const bd=240/plan.bpm;for(let b2=0;b2<plan.len;b2++){const tm=b2*bd+bd*.5;let c=S.sample.changes[0];S.sample.changes.forEach(x=>{if(x.t<=tm)c=x;});
     if(c)S.sample.chords.push({root:c.ch.root,ints:c.ch.ints.slice(),deg:-1,name:c.name,harm:S.mode==='minor'&&mod(c.ch.root-S.key,12)===7&&c.ch.ints[1]===4});else{const rc=res.chords[b2%res.chords.length];S.sample.chords.push(Object.assign({},rc,{name:chordName(rc.root,rc.ints)}));}}
   S.bars=plan.len>8?16:plan.len>4?8:4;S.importChords=null;
@@ -2461,7 +2507,7 @@ async function restoreSession(given){
       for(let i=0;i<(o.src.extra||[]).length;i++){const r=await IDB.get('extra'+i);if(r)SAMPLER.src.extra.push({buffer:recToBuf(r),bpm:o.src.extra[i].bpm,name:o.src.extra[i].name});}}
     SAMPLER.saved=[];for(let i=0;i<(o.saved||[]).length;i++){const r=await IDB.get('saved'+i);if(r)SAMPLER.saved.push({buffer:recToBuf(r),bpm:o.saved[i].bpm,len:o.saved[i].len});}
     if(loop&&o.sample){const lb=recToBuf(loop);S.sample=Object.assign({buffer:lb,solo:false,slices:[]},o.sample);
-      S.sample.changes=chordChanges(lb,S.bpm);S.sample.bassLine=analyzeBass(lb,S.bpm,S.sample.loopBars||4);if(!S.sample.isFlip)delete S.sample.plan;
+      S.sample.changes=chordChanges(lb,S.bpm);S.sample.bassLine=analyzeBass(lb,S.bpm,S.sample.loopBars||4);S.sample.melLine=analyzeMelody(lb,S.bpm,S.sample.loopBars||4);if(!S.sample.isFlip)delete S.sample.plan;
       SAMPLER.view=S.sample.isFlip?'loop':'src';deriveChords();}
     WAVEPEAKS=null;
     AS_IDS={loop:bid(S.sample&&S.sample.buffer),src:bid(SAMPLER.src&&SAMPLER.src.buffer)};
@@ -2587,6 +2633,9 @@ function init(){
   $('addDrums').onclick=()=>{addStem('drums');toast('Drums added, matched to your loop. Re-roll or change the kit any time.');};
   $('addBass').onclick=()=>{addStem('bass');toast('Bassline added from your loop\'s chords.');};
   $('add808').onclick=()=>{addStem('808');toast('808 added from your loop\'s chords.');};
+  $('addCounter').onclick=()=>{addStem('scounter');if(S.opts.autoMix)autoMix(true);toast('Counter melody written from the notes in your loop.');};
+  $('addCandy').onclick=()=>{addStem('gtrcandy');if(S.opts.autoMix)autoMix(true);toast('Guitar ear candy added in the gaps of your loop.');};
+  $('buildBeat').onclick=()=>{if(!S.sample)return;['drums','808','scounter','gtrcandy'].forEach(k=>{const a=ADDABLE.find(x=>x.k===k);if(a&&!S.tracks.some(t=>t.name===a.name))addStem(k);});if(S.opts.autoMix)autoMix(true);toast('Beat built around your loop: drums, 808, counter melody and guitar ear candy.');};
   $('toMidi').onclick=()=>{if(!S.sample)return;toast('Listening for the melody…');setTimeout(()=>{const notes=sampleToMelody();if(notes.length<2){toast('No clear melody found. This works best on a solo vocal or single-note idea.');return;}
     snap();const avg=Math.round(notes.reduce((a,n)=>a+n.p,0)/notes.length);const t=makeTrack({role:'melody',name:'Melody from sample',inst:'mdsine',rhythm:'hum',center:avg});t.notes=notes;S.tracks.push(t);S.sel=t.id;renderTracks();renderSection();drawRoll();restartIfPlaying();toast('Melody stem made from your loop: '+notes.length+' notes.');},30);};
   const em=document.createElement('div');em.className='menu';em.setAttribute('role','menu');document.body.appendChild(em);
